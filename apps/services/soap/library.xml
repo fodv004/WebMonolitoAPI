@@ -1,0 +1,770 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<library xmlns="urn:libreria:soap:library" name="Online Library Catalog">
+  <book>
+    <isbn>9780000000001</isbn>
+    <title>Cien años de soledad</title>
+    <authors>
+      <author>
+        <name>Gabriel García Márquez</name>
+        <nationality>Colombian</nationality>
+      </author>
+    </authors>
+    <publicationYear>1903</publicationYear>
+    <genres>
+      <genre>Fiction</genre>
+    </genres>
+    <price>115.00</price>
+    <stock>2</stock>
+    <format>Hardcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/12627383-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000002</isbn>
+    <title>La casa de los espíritus</title>
+    <authors>
+      <author>
+        <name>Isabel Allende</name>
+        <nationality>Chilean</nationality>
+      </author>
+    </authors>
+    <publicationYear>1906</publicationYear>
+    <genres>
+      <genre>Science</genre>
+      <genre>History</genre>
+    </genres>
+    <price>130.00</price>
+    <stock>3</stock>
+    <format>Paperback</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/3205226-L.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Solitude</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 2).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000003</isbn>
+    <title>Rayuela</title>
+    <authors>
+      <author>
+        <name>Julio Cortázar</name>
+        <nationality>Argentine</nationality>
+      </author>
+      <author>
+        <name>Jorge Luis Borges</name>
+        <nationality>Argentine</nationality>
+      </author>
+    </authors>
+    <publicationYear>1909</publicationYear>
+    <genres>
+      <genre>History</genre>
+    </genres>
+    <price>145.00</price>
+    <stock>4</stock>
+    <format>Digital</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/1047466-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000004</isbn>
+    <title>Ficciones</title>
+    <authors>
+      <author>
+        <name>Jorge Luis Borges</name>
+        <nationality>Argentine</nationality>
+      </author>
+    </authors>
+    <publicationYear>1912</publicationYear>
+    <genres>
+      <genre>Magical Realism</genre>
+      <genre>Poetry</genre>
+    </genres>
+    <price>160.00</price>
+    <stock>5</stock>
+    <format>Audiobook</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/10832290-L.jpg</image>
+      <image main="false" order="1">/uploads/libro4-extra.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Identity</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 4).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000005</isbn>
+    <title>La ciudad y los perros</title>
+    <authors>
+      <author>
+        <name>Mario Vargas Llosa</name>
+        <nationality>Peruvian</nationality>
+      </author>
+    </authors>
+    <publicationYear>1915</publicationYear>
+    <genres>
+      <genre>Poetry</genre>
+    </genres>
+    <price>175.00</price>
+    <stock>6</stock>
+    <format>Softcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/3221667-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000006</isbn>
+    <title>El laberinto de la soledad</title>
+    <authors>
+      <author>
+        <name>Octavio Paz</name>
+        <nationality>Mexican</nationality>
+      </author>
+      <author>
+        <name>Pablo Neruda</name>
+        <nationality>Chilean</nationality>
+      </author>
+    </authors>
+    <publicationYear>1918</publicationYear>
+    <genres>
+      <genre>Horror</genre>
+      <genre>Fantasy</genre>
+    </genres>
+    <price>190.00</price>
+    <stock>7</stock>
+    <format>Hardcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/5349674-L.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Absurdism</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 6).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000007</isbn>
+    <title>Veinte poemas de amor</title>
+    <authors>
+      <author>
+        <name>Pablo Neruda</name>
+        <nationality>Chilean</nationality>
+      </author>
+    </authors>
+    <publicationYear>1921</publicationYear>
+    <genres>
+      <genre>Fantasy</genre>
+    </genres>
+    <price>205.00</price>
+    <stock>8</stock>
+    <format>Paperback</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/747596-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000008</isbn>
+    <title>Como agua para chocolate</title>
+    <authors>
+      <author>
+        <name>Laura Esquivel</name>
+        <nationality>Mexican</nationality>
+      </author>
+    </authors>
+    <publicationYear>1924</publicationYear>
+    <genres>
+      <genre>Science Fiction</genre>
+      <genre>Biography</genre>
+    </genres>
+    <price>220.00</price>
+    <stock>9</stock>
+    <format>Digital</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/8372632-L.jpg</image>
+      <image main="false" order="1">/uploads/libro8-extra.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Alienation</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 8).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000009</isbn>
+    <title>Pedro Páramo</title>
+    <authors>
+      <author>
+        <name>Juan Rulfo</name>
+        <nationality>Mexican</nationality>
+      </author>
+      <author>
+        <name>Carlos Fuentes</name>
+        <nationality>Mexican</nationality>
+      </author>
+    </authors>
+    <publicationYear>1927</publicationYear>
+    <genres>
+      <genre>Biography</genre>
+    </genres>
+    <price>235.00</price>
+    <stock>10</stock>
+    <format>Audiobook</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/5419076-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000010</isbn>
+    <title>La región más transparente</title>
+    <authors>
+      <author>
+        <name>Carlos Fuentes</name>
+        <nationality>Mexican</nationality>
+      </author>
+    </authors>
+    <publicationYear>1930</publicationYear>
+    <genres>
+      <genre>Essay</genre>
+      <genre>Philosophy</genre>
+    </genres>
+    <price>250.00</price>
+    <stock>11</stock>
+    <format>Softcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/1047454-L.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Nostalgia</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 10).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000011</isbn>
+    <title>2666</title>
+    <authors>
+      <author>
+        <name>Roberto Bolaño</name>
+        <nationality>Chilean</nationality>
+      </author>
+    </authors>
+    <publicationYear>1933</publicationYear>
+    <genres>
+      <genre>Philosophy</genre>
+    </genres>
+    <price>265.00</price>
+    <stock>12</stock>
+    <format>Hardcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/1047310-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000012</isbn>
+    <title>La noche de Tlatelolco</title>
+    <authors>
+      <author>
+        <name>Elena Poniatowska</name>
+        <nationality>Mexican</nationality>
+      </author>
+      <author>
+        <name>José Saramago</name>
+        <nationality>Portuguese</nationality>
+      </author>
+    </authors>
+    <publicationYear>1936</publicationYear>
+    <genres>
+      <genre>Crime Fiction</genre>
+      <genre>Romance</genre>
+    </genres>
+    <price>280.00</price>
+    <stock>13</stock>
+    <format>Paperback</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/1054023-L.jpg</image>
+      <image main="false" order="1">/uploads/libro12-extra.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Romantic Love</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 12).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000013</isbn>
+    <title>Ensayo sobre la ceguera</title>
+    <authors>
+      <author>
+        <name>José Saramago</name>
+        <nationality>Portuguese</nationality>
+      </author>
+    </authors>
+    <publicationYear>1939</publicationYear>
+    <genres>
+      <genre>Romance</genre>
+    </genres>
+    <price>295.00</price>
+    <stock>14</stock>
+    <format>Digital</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/115428-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000014</isbn>
+    <title>Don Quijote de la Mancha</title>
+    <authors>
+      <author>
+        <name>Miguel de Cervantes</name>
+        <nationality>Spanish</nationality>
+      </author>
+    </authors>
+    <publicationYear>1942</publicationYear>
+    <genres>
+      <genre>Adventure</genre>
+      <genre>Children's</genre>
+    </genres>
+    <price>310.00</price>
+    <stock>15</stock>
+    <format>Audiobook</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/14428305-L.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Circular Time</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 14).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000015</isbn>
+    <title>Romancero gitano</title>
+    <authors>
+      <author>
+        <name>Federico García Lorca</name>
+        <nationality>Spanish</nationality>
+      </author>
+      <author>
+        <name>George Orwell</name>
+        <nationality>British</nationality>
+      </author>
+    </authors>
+    <publicationYear>1945</publicationYear>
+    <genres>
+      <genre>Children's</genre>
+    </genres>
+    <price>325.00</price>
+    <stock>16</stock>
+    <format>Softcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/5985528-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000016</isbn>
+    <title>1984</title>
+    <authors>
+      <author>
+        <name>George Orwell</name>
+        <nationality>British</nationality>
+      </author>
+    </authors>
+    <publicationYear>1948</publicationYear>
+    <genres>
+      <genre>Fiction</genre>
+      <genre>Science</genre>
+    </genres>
+    <price>340.00</price>
+    <stock>17</stock>
+    <format>Hardcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/8745958-L.jpg</image>
+      <image main="false" order="1">/uploads/libro16-extra.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Migration</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 16).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000017</isbn>
+    <title>Mrs. Dalloway</title>
+    <authors>
+      <author>
+        <name>Virginia Woolf</name>
+        <nationality>British</nationality>
+      </author>
+    </authors>
+    <publicationYear>1951</publicationYear>
+    <genres>
+      <genre>Science</genre>
+    </genres>
+    <price>355.00</price>
+    <stock>18</stock>
+    <format>Paperback</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/6397580-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000018</isbn>
+    <title>Orgullo y prejuicio</title>
+    <authors>
+      <author>
+        <name>Jane Austen</name>
+        <nationality>British</nationality>
+      </author>
+      <author>
+        <name>Ernest Hemingway</name>
+        <nationality>American</nationality>
+      </author>
+    </authors>
+    <publicationYear>1954</publicationYear>
+    <genres>
+      <genre>History</genre>
+      <genre>Magical Realism</genre>
+    </genres>
+    <price>370.00</price>
+    <stock>19</stock>
+    <format>Digital</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/14348537-L.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Freedom</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 18).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000019</isbn>
+    <title>El viejo y el mar</title>
+    <authors>
+      <author>
+        <name>Ernest Hemingway</name>
+        <nationality>American</nationality>
+      </author>
+    </authors>
+    <publicationYear>1957</publicationYear>
+    <genres>
+      <genre>Magical Realism</genre>
+    </genres>
+    <price>385.00</price>
+    <stock>20</stock>
+    <format>Audiobook</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/463307-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000020</isbn>
+    <title>Beloved</title>
+    <authors>
+      <author>
+        <name>Toni Morrison</name>
+        <nationality>American</nationality>
+      </author>
+    </authors>
+    <publicationYear>1960</publicationYear>
+    <genres>
+      <genre>Poetry</genre>
+      <genre>Horror</genre>
+    </genres>
+    <price>400.00</price>
+    <stock>21</stock>
+    <format>Softcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/8261367-L.jpg</image>
+      <image main="false" order="1">/uploads/libro20-extra.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Human Nature</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 20).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000021</isbn>
+    <title>La metamorfosis</title>
+    <authors>
+      <author>
+        <name>Franz Kafka</name>
+        <nationality>Czech</nationality>
+      </author>
+      <author>
+        <name>Fiodor Dostoyevski</name>
+        <nationality>Russian</nationality>
+      </author>
+    </authors>
+    <publicationYear>1963</publicationYear>
+    <genres>
+      <genre>Horror</genre>
+    </genres>
+    <price>415.00</price>
+    <stock>22</stock>
+    <format>Hardcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/6889547-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000022</isbn>
+    <title>Crimen y castigo</title>
+    <authors>
+      <author>
+        <name>Fiodor Dostoyevski</name>
+        <nationality>Russian</nationality>
+      </author>
+    </authors>
+    <publicationYear>1966</publicationYear>
+    <genres>
+      <genre>Fantasy</genre>
+      <genre>Science Fiction</genre>
+    </genres>
+    <price>430.00</price>
+    <stock>23</stock>
+    <format>Paperback</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/13116014-L.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Solitude</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 22).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000023</isbn>
+    <title>Guerra y paz</title>
+    <authors>
+      <author>
+        <name>León Tolstói</name>
+        <nationality>Russian</nationality>
+      </author>
+    </authors>
+    <publicationYear>1969</publicationYear>
+    <genres>
+      <genre>Science Fiction</genre>
+    </genres>
+    <price>445.00</price>
+    <stock>24</stock>
+    <format>Digital</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/12621906-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000024</isbn>
+    <title>Tokio Blues</title>
+    <authors>
+      <author>
+        <name>Haruki Murakami</name>
+        <nationality>Japanese</nationality>
+      </author>
+      <author>
+        <name>Yukio Mishima</name>
+        <nationality>Japanese</nationality>
+      </author>
+    </authors>
+    <publicationYear>1972</publicationYear>
+    <genres>
+      <genre>Biography</genre>
+      <genre>Essay</genre>
+    </genres>
+    <price>460.00</price>
+    <stock>25</stock>
+    <format>Audiobook</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/2237620-L.jpg</image>
+      <image main="false" order="1">/uploads/libro24-extra.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Identity</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 24).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000025</isbn>
+    <title>Confesiones de una máscara</title>
+    <authors>
+      <author>
+        <name>Yukio Mishima</name>
+        <nationality>Japanese</nationality>
+      </author>
+    </authors>
+    <publicationYear>1975</publicationYear>
+    <genres>
+      <genre>Essay</genre>
+    </genres>
+    <price>475.00</price>
+    <stock>1</stock>
+    <format>Softcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/597870-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000026</isbn>
+    <title>El extranjero</title>
+    <authors>
+      <author>
+        <name>Albert Camus</name>
+        <nationality>French</nationality>
+      </author>
+    </authors>
+    <publicationYear>1978</publicationYear>
+    <genres>
+      <genre>Philosophy</genre>
+      <genre>Crime Fiction</genre>
+    </genres>
+    <price>490.00</price>
+    <stock>2</stock>
+    <format>Hardcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/13151269-L.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Absurdism</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 26).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000027</isbn>
+    <title>Los miserables</title>
+    <authors>
+      <author>
+        <name>Victor Hugo</name>
+        <nationality>French</nationality>
+      </author>
+      <author>
+        <name>Umberto Eco</name>
+        <nationality>Italian</nationality>
+      </author>
+    </authors>
+    <publicationYear>1981</publicationYear>
+    <genres>
+      <genre>Crime Fiction</genre>
+    </genres>
+    <price>505.00</price>
+    <stock>3</stock>
+    <format>Paperback</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/12721865-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000028</isbn>
+    <title>El nombre de la rosa</title>
+    <authors>
+      <author>
+        <name>Umberto Eco</name>
+        <nationality>Italian</nationality>
+      </author>
+    </authors>
+    <publicationYear>1984</publicationYear>
+    <genres>
+      <genre>Romance</genre>
+      <genre>Adventure</genre>
+    </genres>
+    <price>520.00</price>
+    <stock>4</stock>
+    <format>Digital</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/15023290-L.jpg</image>
+      <image main="false" order="1">/uploads/libro28-extra.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Alienation</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 28).</definition>
+      </concept>
+    </concepts>
+  </book>
+  <book>
+    <isbn>9780000000029</isbn>
+    <title>Las ciudades invisibles</title>
+    <authors>
+      <author>
+        <name>Italo Calvino</name>
+        <nationality>Italian</nationality>
+      </author>
+    </authors>
+    <publicationYear>1987</publicationYear>
+    <genres>
+      <genre>Adventure</genre>
+    </genres>
+    <price>535.00</price>
+    <stock>5</stock>
+    <format>Audiobook</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/963147-L.jpg</image>
+    </images>
+    <concepts/>
+  </book>
+  <book>
+    <isbn>9780000000030</isbn>
+    <title>El hobbit</title>
+    <authors>
+      <author>
+        <name>J.R.R. Tolkien</name>
+        <nationality>British</nationality>
+      </author>
+      <author>
+        <name>Gabriel García Márquez</name>
+        <nationality>Colombian</nationality>
+      </author>
+    </authors>
+    <publicationYear>1990</publicationYear>
+    <genres>
+      <genre>Children's</genre>
+      <genre>Fiction</genre>
+    </genres>
+    <price>550.00</price>
+    <stock>6</stock>
+    <format>Softcover</format>
+    <images>
+      <image main="true" order="0">https://covers.openlibrary.org/b/id/14627509-L.jpg</image>
+    </images>
+    <concepts>
+      <concept>
+        <name>Nostalgia</name>
+        <definition>Example definition for the concept associated with this book, used as synthetic test data (record 30).</definition>
+      </concept>
+    </concepts>
+  </book>
+</library>

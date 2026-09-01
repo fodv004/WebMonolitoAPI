@@ -1,0 +1,11 @@
+const express=require('express'),session=require('express-session'),path=require('path');require('dotenv').config();const app=express();
+let BASE_PATH=(process.env.BASE_PATH||'').trim();
+if(BASE_PATH&&!BASE_PATH.startsWith('/'))BASE_PATH='/'+BASE_PATH;
+BASE_PATH=BASE_PATH.replace(/\/+$/,'');
+app.set('view engine','ejs');app.set('views',path.join(__dirname,'views'));app.use(express.urlencoded({extended:true}));
+const staticMw=express.static(path.join(__dirname,'../public'));
+if(BASE_PATH)app.use(BASE_PATH,staticMw);else app.use(staticMw);
+app.use(session({secret:process.env.SESSION_SECRET||'cambiar-en-produccion',resave:false,saveUninitialized:false,cookie:{httpOnly:true,sameSite:'lax'}}));app.use((req,res,next)=>{res.locals.user=req.session.user;res.locals.base=BASE_PATH;next()});
+const webRouter=require('./routes/web');
+if(BASE_PATH)app.use(BASE_PATH,webRouter);else app.use(webRouter);
+app.use((err,req,res,next)=>{console.error(err);const msg=err.code==='23505'?'El registro ya existe o viola una regla única.':err.code==='23503'?'No se puede eliminar porque el dato está relacionado.':err.code==='LIMIT_FILE_SIZE'?'La imagen supera el tamaño máximo permitido (5MB).':err.message;res.status(500).render('error',{message:msg,status:500})});app.listen(process.env.PORT||3000,()=>console.log('Librería en http://localhost:'+(process.env.PORT||3000)+BASE_PATH));

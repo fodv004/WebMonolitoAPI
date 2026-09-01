@@ -1,0 +1,330 @@
+/* ==========================================================================
+   estilo.css
+   Pure-CSS presentation for library01.xml (no XSLT, no JavaScript).
+   Renders raw XML elements as a professional book-catalog grid using only
+   CSS: display types, generated content (attr()/counter()), and :empty /
+   attribute selectors to shape data that has no HTML markup of its own.
+   ========================================================================== */
+
+:root {
+  --bg: #f4f5f7;
+  --card-bg: #ffffff;
+  --text: #1f2430;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #4338ca;
+  --accent-soft: #eef2ff;
+  --price: #0a7a3d;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161c;
+    --card-bg: #1c1f27;
+    --text: #e5e7eb;
+    --muted: #9aa0aa;
+    --border: #2b2f3a;
+    --accent: #a5b4fc;
+    --accent-soft: #252a3d;
+    --price: #4ade80;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ---- Document root: acts as page + grid container ---- */
+library {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+  min-height: 100vh;
+  margin: 0;
+  padding: 2.5rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+  counter-reset: booknum;
+}
+
+/* Page heading, built entirely from the root's "name" attribute */
+library::before {
+  content: attr(name);
+  grid-column: 1 / -1;
+  display: block;
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+/* Footer summary, built entirely with a CSS counter */
+library::after {
+  content: "Total in catalog: " counter(booknum) " books";
+  grid-column: 1 / -1;
+  display: block;
+  text-align: center;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* ---- Book card ---- */
+book {
+  counter-increment: booknum;
+  position: relative;
+  display: block;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem 1.5rem;
+  box-shadow: var(--shadow);
+}
+
+book::before {
+  content: "#" counter(booknum);
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 1;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+}
+
+/* Cover photo, added by library.xsl as a real <img> so the browser
+   actually attempts to load it; falls back to a soft placeholder box
+   (via background + fixed box) when the file is missing. */
+book > img.cover {
+  display: block;
+  width: calc(100% + 0.5rem);
+  height: 190px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--accent-soft);
+  margin: -0.25rem -0.25rem 0.85rem;
+}
+
+isbn {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+isbn::before {
+  content: "ISBN ";
+}
+
+title {
+  display: block;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.4rem;
+}
+
+/* ---- Authors ---- */
+authors {
+  display: block;
+  margin-bottom: 0.6rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+authors::before {
+  content: "By ";
+  font-weight: 600;
+  color: var(--text);
+}
+
+author {
+  display: inline;
+}
+
+author:not(:last-child)::after {
+  content: ", ";
+}
+
+author > name {
+  display: inline;
+  font-style: normal;
+  color: var(--text);
+}
+
+author > nationality {
+  display: inline;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+author > nationality::before {
+  content: " (";
+}
+
+author > nationality::after {
+  content: ")";
+}
+
+/* ---- Genres ---- */
+genres {
+  display: block;
+  margin-bottom: 0.7rem;
+}
+
+genre {
+  display: inline-block;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.22rem 0.6rem;
+  border-radius: 999px;
+  margin: 0 0.35rem 0.35rem 0;
+}
+
+/* ---- Meta row: year / price / stock / format ---- */
+publicationYear,
+price,
+stock,
+format {
+  display: inline-block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+  margin: 0 0.4rem 0.4rem 0;
+}
+
+publicationYear::before {
+  content: "\1F4C5\0020"; /* calendar */
+}
+
+price {
+  font-weight: 700;
+  color: var(--price);
+  border-color: var(--price);
+}
+
+price::before {
+  content: "$";
+}
+
+stock::before {
+  content: "Stock: ";
+}
+
+format::before {
+  content: "Format: ";
+}
+
+/* ---- Images ---- */
+images {
+  display: block;
+  margin-top: 0.8rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--border);
+  font-size: 0.75rem;
+}
+
+images::before {
+  content: "Images";
+  display: block;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+
+image {
+  display: block;
+  color: var(--muted);
+  padding: 0.1rem 0;
+  word-break: break-all;
+}
+
+image::before {
+  content: "\1F5BC\0020"; /* framed picture */
+}
+
+image[main="true"] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+image[main="true"]::after {
+  content: " \2014 cover";
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* ---- Concepts (only rendered when the book actually has any) ---- */
+concepts:empty {
+  display: none;
+}
+
+concepts {
+  display: block;
+  margin-top: 0.8rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--border);
+}
+
+concepts::before {
+  content: "Themes";
+  display: block;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+
+concept {
+  display: block;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+concept > name {
+  display: inline;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+concept > name::after {
+  content: " \2014 ";
+  font-weight: 400;
+  color: var(--muted);
+}
+
+concept > definition {
+  display: inline;
+  color: var(--muted);
+}

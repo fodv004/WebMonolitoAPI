@@ -1,0 +1,16 @@
+const db = require('../config/db');
+exports.list = async (q) => {
+  const base = `SELECT l.*, f.nombre formato, COALESCE(string_agg(DISTINCT a.nombre, ', '), 'Sin autor') autores, (SELECT url FROM imagenes i WHERE i.isbn=l.isbn ORDER BY es_principal DESC, orden LIMIT 1) portada FROM libros l JOIN formatos f ON f.id_formato=l.id_formato LEFT JOIN libro_autor la ON la.isbn=l.isbn LEFT JOIN autores a ON a.id_autor=la.id_autor`;
+  if (q) {
+    return (await db.query(`${base} WHERE l.isbn = $1 OR l.titulo ILIKE $2 GROUP BY l.isbn,f.nombre ORDER BY l.fecha_creacion DESC`, [q, '%' + q + '%'])).rows;
+  }
+  return (await db.query(`${base} GROUP BY l.isbn,f.nombre ORDER BY l.fecha_creacion DESC`)).rows;
+};
+exports.get = async isbn => { const book=(await db.query('SELECT * FROM libros WHERE isbn=$1',[isbn])).rows[0]; if(!book)return null; const [autores,generos,conceptos,imagenes]=(await Promise.all(['SELECT a.* FROM autores a JOIN libro_autor x ON x.id_autor=a.id_autor WHERE x.isbn=$1','SELECT g.* FROM generos g JOIN libro_genero x ON x.id_genero=g.id_genero WHERE x.isbn=$1','SELECT c.*,x.definicion FROM conceptos c JOIN libro_concepto x ON x.id_concepto=c.id_concepto WHERE x.isbn=$1','SELECT * FROM imagenes WHERE isbn=$1 ORDER BY es_principal DESC,orden,id_imagen'].map(q=>db.query(q,[isbn])))).map(r=>r.rows); return {...book,autores,generos,conceptos,imagenes}; };
+exports.save = async (data, originalIsbn) => { const values=[data.isbn,data.titulo,data.anio_publicacion,data.precio,data.stock,data.id_formato]; if(originalIsbn) await db.query('UPDATE libros SET isbn=$1,titulo=$2,anio_publicacion=$3,precio=$4,stock=$5,id_formato=$6 WHERE isbn=$7',[...values,originalIsbn]); else await db.query('INSERT INTO libros(isbn,titulo,anio_publicacion,precio,stock,id_formato) VALUES($1,$2,$3,$4,$5,$6)',values); };
+exports.remove = async isbn => db.query('DELETE FROM libros WHERE isbn=$1',[isbn]);
+exports.setRelations = async (isbn, data) => { const client=await db.connect(); try { await client.query('BEGIN'); for(const [table,column,items] of [['libro_autor','id_autor',data.autores],['libro_genero','id_genero',data.generos]]) { await client.query(`DELETE FROM ${table} WHERE isbn=$1`,[isbn]); for(const id of (Array.isArray(items)?items:items?[items]:[])) await client.query(`INSERT INTO ${table}(isbn,${column}) VALUES($1,$2)`,[isbn,id]); } await client.query('COMMIT'); } catch(e){await client.query('ROLLBACK');throw e;} finally {client.release();} };
+exports.addConcept = async (isbn,id,definicion) => db.query('INSERT INTO libro_concepto(isbn,id_concepto,definicion) VALUES($1,$2,$3) ON CONFLICT(isbn,id_concepto) DO UPDATE SET definicion=EXCLUDED.definicion',[isbn,id,definicion]);
+exports.removeConcept = async (isbn,id) => db.query('DELETE FROM libro_concepto WHERE isbn=$1 AND id_concepto=$2',[isbn,id]);
+exports.addImage = async (isbn,url,principal,orden) => { if(principal) await db.query('UPDATE imagenes SET es_principal=FALSE WHERE isbn=$1',[isbn]); return db.query('INSERT INTO imagenes(isbn,url,es_principal,orden) VALUES($1,$2,$3,$4)',[isbn,url,principal,orden||0]); };
+exports.removeImage = async id => db.query('DELETE FROM imagenes WHERE id_imagen=$1',[id]);
