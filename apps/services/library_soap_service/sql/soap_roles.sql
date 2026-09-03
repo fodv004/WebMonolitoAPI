@@ -7,7 +7,7 @@
 CREATE ROLE soap_user WITH LOGIN PASSWORD 'soap666';
 
 -- 2. Permitir que se conecte a la base de datos
-GRANT CONNECT ON DATABASE libreria TO soap_user;  -- ajusta 'libreria' al nombre real de tu BD
+GRANT CONNECT ON DATABASE library TO soap_user;  -- ajusta 'libreria' al nombre real de tu BD
 GRANT USAGE ON SCHEMA public TO soap_user;
 
 -- ============================================================
