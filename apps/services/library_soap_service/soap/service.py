@@ -26,7 +26,8 @@ def obtener_conceptos_pendientes(correo_clasificador):
             cur.execute(
                 """
                 SELECT l.isbn, l.titulo, c.id_concepto, c.nombre,
-                       lc.definicion, g.nombre AS nombre_genero
+                       lc.definicion,
+                       string_agg(DISTINCT g.nombre, ', ') AS nombre_genero
                 FROM libro_concepto lc
                 JOIN libros l ON l.isbn = lc.isbn
                 JOIN conceptos c ON c.id_concepto = lc.id_concepto
@@ -40,6 +41,7 @@ def obtener_conceptos_pendientes(correo_clasificador):
                       AND cc.id_concepto = c.id_concepto
                       AND cl.correo = %s
                 )
+                GROUP BY l.isbn, l.titulo, c.id_concepto, c.nombre, lc.definicion
                 ORDER BY l.isbn, c.id_concepto;
                 """,
                 (correo_clasificador,),
