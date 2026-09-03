@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions name="LibraryClassifierService"
+    targetNamespace="http://libraryclassifier/library/soap/classifier"
+    xmlns:tns="http://libraryclassifier/library/soap/classifier"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns="http://schemas.xmlsoap.org/wsdl/">
+
+  <!-- ============================================================
+       TYPES: definiciones XSD de cada mensaje de entrada/salida.
+       Solo se exponen los datos necesarios (ver Parte 5, punto 10:
+       tabla de auditoria del contrato). No se expone id_clasificador
+       interno, password_hash, ni columnas del monolito no relevantes.
+       ============================================================ -->
+  <types>
+    <xsd:schema targetNamespace="http://libraryclassifier/library/soap/classifier">
+
+      <!-- Tipo reutilizable: modelo Cloud permitido -->
+      <xsd:simpleType name="ModeloCloudType">
+        <xsd:restriction base="xsd:string">
+          <xsd:enumeration value="IaaS"/>
+          <xsd:enumeration value="PaaS"/>
+          <xsd:enumeration value="SaaS"/>
+          <xsd:enumeration value="FaaS"/>
+        </xsd:restriction>
+      </xsd:simpleType>
+
+      <!-- ===== ObtenerConceptosPendientes ===== -->
+      <xsd:element name="ObtenerConceptosPendientesRequest">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="correoClasificador" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:complexType name="ConceptoPendienteType">
+        <xsd:sequence>
+          <xsd:element name="isbn" type="xsd:string"/>
+          <xsd:element name="tituloLibro" type="xsd:string"/>
+          <xsd:element name="idConcepto" type="xsd:int"/>
+          <xsd:element name="nombreConcepto" type="xsd:string"/>
+          <xsd:element name="definicion" type="xsd:string"/>
+          <xsd:element name="nombreGenero" type="xsd:string" minOccurs="0"/>
+        </xsd:sequence>
+      </xsd:complexType>
+
+      <xsd:element name="ObtenerConceptosPendientesResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="conceptoPendiente" type="tns:ConceptoPendienteType"
+                         minOccurs="0" maxOccurs="unbounded"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <!-- ===== RegistrarClasificacion ===== -->
+      <xsd:element name="RegistrarClasificacionRequest">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="nombre" type="xsd:string"/>
+            <xsd:element name="apellidos" type="xsd:string"/>
+            <xsd:element name="correo" type="xsd:string"/>
+            <xsd:element name="isbn" type="xsd:string"/>
+            <xsd:element name="idConcepto" type="xsd:int"/>
+            <xsd:element name="modeloCloud" type="tns:ModeloCloudType"/>
+            <xsd:element name="tipoCliente" type="xsd:string"/>
+            <xsd:element name="identificadorCliente" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="RegistrarClasificacionResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="idClasificacion" type="xsd:int"/>
+            <xsd:element name="fechaClasificacion" type="xsd:dateTime"/>
+            <xsd:element name="mensaje" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <!-- ===== ObtenerProgresoUsuario ===== -->
+      <xsd:element name="ObtenerProgresoUsuarioRequest">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="correoClasificador" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <xsd:element name="ObtenerProgresoUsuarioResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="correo" type="xsd:string"/>
+            <xsd:element name="totalClasificados" type="xsd:int"/>
+            <xsd:element name="totalPendientes" type="xsd:int"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+      <!-- ===== SOAP Fault: detalle estructurado de error ===== -->
+      <xsd:element name="ClassifierFaultDetail">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="codigo" type="xsd:string"/>
+            <xsd:element name="mensaje" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
+    </xsd:schema>
+  </types>
+
+  <!-- ============================================================
+       MESSAGES
+       ============================================================ -->
+  <message name="ObtenerConceptosPendientesInput">
+    <part name="parameters" element="tns:ObtenerConceptosPendientesRequest"/>
+  </message>
+  <message name="ObtenerConceptosPendientesOutput">
+    <part name="parameters" element="tns:ObtenerConceptosPendientesResponse"/>
+  </message>
+
+  <message name="RegistrarClasificacionInput">
+    <part name="parameters" element="tns:RegistrarClasificacionRequest"/>
+  </message>
+  <message name="RegistrarClasificacionOutput">
+    <part name="parameters" element="tns:RegistrarClasificacionResponse"/>
+  </message>
+
+  <message name="ObtenerProgresoUsuarioInput">
+    <part name="parameters" element="tns:ObtenerProgresoUsuarioRequest"/>
+  </message>
+  <message name="ObtenerProgresoUsuarioOutput">
+    <part name="parameters" element="tns:ObtenerProgresoUsuarioResponse"/>
+  </message>
+
+  <message name="ClassifierFault">
+    <part name="fault" element="tns:ClassifierFaultDetail"/>
+  </message>
+
+  <!-- ============================================================
+       PORT TYPE (interfaz): las 3 operaciones obligatorias
+       ============================================================ -->
+  <portType name="LibraryClassifierPortType">
+
+    <operation name="ObtenerConceptosPendientes">
+      <input message="tns:ObtenerConceptosPendientesInput"/>
+      <output message="tns:ObtenerConceptosPendientesOutput"/>
+      <fault name="ClassifierFault" message="tns:ClassifierFault"/>
+    </operation>
+
+    <operation name="RegistrarClasificacion">
+      <input message="tns:RegistrarClasificacionInput"/>
+      <output message="tns:RegistrarClasificacionOutput"/>
+      <fault name="ClassifierFault" message="tns:ClassifierFault"/>
+    </operation>
+
+    <operation name="ObtenerProgresoUsuario">
+      <input message="tns:ObtenerProgresoUsuarioInput"/>
+      <output message="tns:ObtenerProgresoUsuarioOutput"/>
+      <fault name="ClassifierFault" message="tns:ClassifierFault"/>
+    </operation>
+
+  </portType>
+
+  <!-- ============================================================
+       BINDING: SOAP 1.1, estilo document/literal
+       ============================================================ -->
+  <binding name="LibraryClassifierBinding" type="tns:LibraryClassifierPortType">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+
+    <operation name="ObtenerConceptosPendientes">
+      <soap:operation soapAction="http://libraryclassifier/library/soap/classifier/ObtenerConceptosPendientes"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+      <fault name="ClassifierFault"><soap:fault name="ClassifierFault" use="literal"/></fault>
+    </operation>
+
+    <operation name="RegistrarClasificacion">
+      <soap:operation soapAction="http://libraryclassifier/library/soap/classifier/RegistrarClasificacion"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+      <fault name="ClassifierFault"><soap:fault name="ClassifierFault" use="literal"/></fault>
+    </operation>
+
+    <operation name="ObtenerProgresoUsuario">
+      <soap:operation soapAction="http://libraryclassifier/library/soap/classifier/ObtenerProgresoUsuario"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+      <fault name="ClassifierFault"><soap:fault name="ClassifierFault" use="literal"/></fault>
+    </operation>
+
+  </binding>
+
+  <!-- ============================================================
+       SERVICE: endpoint real del módulo Flask
+       Ajusta host/puerto/ruta a donde corra tu servidor.
+       ============================================================ -->
+  <service name="LibraryClassifierService">
+    <port name="LibraryClassifierPort" binding="tns:LibraryClassifierBinding">
+      <soap:address location="http://localhost:5000/soap"/>
+    </port>
+  </service>
+
+</definitions>
