@@ -20,6 +20,8 @@ class ClasificacionDuplicada(Exception):
     pass
 
 
+class AutenticacionInvalida(Exception):
+    pass
 
 #acu
 _CASOS = {
