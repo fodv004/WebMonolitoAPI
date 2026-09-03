@@ -20,10 +20,13 @@ class ClasificacionDuplicada(Exception):
     pass
 
 
+
+#acu
 _CASOS = {
     ConceptoInexistente: (400, "soap:Client", "Concepto inexistente.", "CONCEPTO_INEXISTENTE"),
     ModeloInvalido: (400, "soap:Client", "Modelo Cloud invalido.", "MODELO_INVALIDO"),
     ClasificacionDuplicada: (409, "soap:Client", "Clasificacion duplicada.", "DUPLICADO_409"),
+    AutenticacionInvalida: (401, "soap:Client", "Autenticacion invalida.", "AUTENTICACION_INVALIDA"),
 }
 
 
