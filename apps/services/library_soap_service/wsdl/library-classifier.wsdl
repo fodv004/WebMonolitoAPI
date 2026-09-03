@@ -99,6 +99,22 @@
         </xsd:complexType>
       </xsd:element>
 
+      <!-- ===== ObtenerEstadisticasPorModelo (Tarea 1 - protegida con WS-Security) ===== -->
+      <xsd:element name="ObtenerEstadisticasPorModeloRequest">
+        <xsd:complexType/>
+      </xsd:element>
+
+      <xsd:element name="ObtenerEstadisticasPorModeloResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="IaaS" type="xsd:int"/>
+            <xsd:element name="PaaS" type="xsd:int"/>
+            <xsd:element name="SaaS" type="xsd:int"/>
+            <xsd:element name="FaaS" type="xsd:int"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+
       <!-- ===== SOAP Fault: detalle estructurado de error ===== -->
       <xsd:element name="ClassifierFaultDetail">
         <xsd:complexType>
@@ -136,6 +152,13 @@
     <part name="parameters" element="tns:ObtenerProgresoUsuarioResponse"/>
   </message>
 
+  <message name="ObtenerEstadisticasPorModeloInput">
+    <part name="parameters" element="tns:ObtenerEstadisticasPorModeloRequest"/>
+  </message>
+  <message name="ObtenerEstadisticasPorModeloOutput">
+    <part name="parameters" element="tns:ObtenerEstadisticasPorModeloResponse"/>
+  </message>
+
   <message name="ClassifierFault">
     <part name="fault" element="tns:ClassifierFaultDetail"/>
   </message>
@@ -160,6 +183,13 @@
     <operation name="ObtenerProgresoUsuario">
       <input message="tns:ObtenerProgresoUsuarioInput"/>
       <output message="tns:ObtenerProgresoUsuarioOutput"/>
+      <fault name="ClassifierFault" message="tns:ClassifierFault"/>
+    </operation>
+
+    <!-- Protegida con WS-Security (UsernameToken en soap:Header) -->
+    <operation name="ObtenerEstadisticasPorModelo">
+      <input message="tns:ObtenerEstadisticasPorModeloInput"/>
+      <output message="tns:ObtenerEstadisticasPorModeloOutput"/>
       <fault name="ClassifierFault" message="tns:ClassifierFault"/>
     </operation>
 
@@ -192,6 +222,13 @@
       <fault name="ClassifierFault"><soap:fault name="ClassifierFault" use="literal"/></fault>
     </operation>
 
+    <operation name="ObtenerEstadisticasPorModelo">
+      <soap:operation soapAction="http://libraryclassifier/library/soap/classifier/ObtenerEstadisticasPorModelo"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+      <fault name="ClassifierFault"><soap:fault name="ClassifierFault" use="literal"/></fault>
+    </operation>
+
   </binding>
 
   <!-- ============================================================
@@ -200,7 +237,7 @@
        ============================================================ -->
   <service name="LibraryClassifierService">
     <port name="LibraryClassifierPort" binding="tns:LibraryClassifierBinding">
-      <soap:address location="http://localhost:5000/soap"/>
+      <soap:address location="http://34.51.1.241:5000/soap"/>
     </port>
   </service>
 

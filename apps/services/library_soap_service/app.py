@@ -14,6 +14,7 @@ from soap.envelope import (
     SoapParseError,
 )
 from soap import service
+from soap import service, faults, security
 
 app = Flask(__name__)
 
@@ -69,6 +70,16 @@ def soap_endpoint():
             )
             return Response(response_xml, status=200, mimetype="text/xml")
 
+        elif operation_name == "ObtenerEstadisticasPorModeloRequest":
+            # Operacion protegida con WS-Security (Tarea 1): valida el
+            # UsernameToken del Header antes de ejecutar cualquier logica.
+            security.validar_ws_security(header_el)
+            estadisticas = service.obtener_estadisticas_por_modelo()
+            response_xml = build_response_envelope(
+                "ObtenerEstadisticasPorModeloResponse", estadisticas
+            )
+            return Response(response_xml, status=200, mimetype="text/xml")
+
         else:
             fault_xml = build_fault_envelope(
                 faultcode="soap:Client",
@@ -89,6 +100,10 @@ def soap_endpoint():
     except service.ClasificacionDuplicada as e:
         fault_xml = build_fault_envelope("soap:Client", "Clasificacion duplicada.", "DUPLICADO_409", str(e))
         return Response(fault_xml, status=409, mimetype="text/xml")
+
+    except faults.AutenticacionInvalida as e:
+        fault_xml, status = faults.build_business_fault(e)
+        return Response(fault_xml, status=status, mimetype="text/xml")
 
     except Exception as e:
         fault_xml = build_fault_envelope(
