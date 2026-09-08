@@ -5,6 +5,8 @@ que recibe HTTP POST con un SOAP Envelope XML, identifica la
 operacion solicitada y delega a soap/service.py (Paso 12: ya
 conectado a PostgreSQL de verdad, no placeholder).
 """
+import os
+
 from flask import Flask, request, Response
 
 from soap.envelope import (
@@ -119,4 +121,4 @@ def soap_endpoint():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=int(os.getenv("FLASK_PORT", 5001)), debug=True)

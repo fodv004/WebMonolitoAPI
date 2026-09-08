@@ -11,7 +11,7 @@ from flask import Blueprint, Response, jsonify, request
 
 from db.connection import get_connection
 
-rest_bp = Blueprint("rest_api", __name__, url_prefix="/api")
+rest_bp = Blueprint("rest_api", __name__)
 
 FORMATOS_VALIDOS = {"xml", "json"}
 MODELOS_CLOUD = ("IaaS", "PaaS", "SaaS", "FaaS")
@@ -84,6 +84,23 @@ def _fetch_portada(isbn):
         conn.close()
 
 
+def _fetch_todos_libros():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre
+                FROM libros l
+                JOIN formatos f ON f.id_formato = l.id_formato
+                ORDER BY l.isbn
+                """
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
 def _fetch_conceptos_cloud_libro(isbn):
     """Conceptos de Cloud Computing (IaaS/PaaS/SaaS/FaaS) que ya han sido
     asignados (via SOAP, tabla clasificaciones_cloud) a los conceptos
@@ -152,7 +169,53 @@ def _fetch_libros_minimos_con_imagenes():
 
 
 # ============================================================
-# 1. Detalle de un libro: xml -> conceptos cloud asociados,
+# 1. Lista de todos los libros: xml -> conceptos cloud asociados
+#    por libro, json -> tarjetas ("cards") de todos los libros.
+# ============================================================
+@rest_bp.route("/books", methods=["GET"])
+def listar_libros():
+    formato = _resolver_formato()
+    libros = _fetch_todos_libros()
+
+    if formato == "json":
+        cards = [
+            {
+                "isbn": isbn,
+                "titulo": titulo,
+                "anio": anio,
+                "precio": float(precio),
+                "stock": stock,
+                "formato": formato_nombre,
+                "portada": _fetch_portada(isbn),
+                "href": f"{request.host_url.rstrip('/')}/books/{isbn}",
+            }
+            for isbn, titulo, anio, precio, stock, formato_nombre in libros
+        ]
+        return jsonify(cards), 200
+
+    root = ET.Element("books")
+    for isbn, titulo, anio, precio, stock, formato_nombre in libros:
+        book_el = ET.SubElement(root, "book", {"isbn": isbn})
+        ET.SubElement(book_el, "title").text = titulo
+        ET.SubElement(book_el, "year").text = str(anio)
+        ET.SubElement(book_el, "price").text = str(precio)
+        ET.SubElement(book_el, "stock").text = str(stock)
+        ET.SubElement(book_el, "format").text = formato_nombre
+
+        concepts_el = ET.SubElement(book_el, "cloudConcepts")
+        for id_concepto, nombre_concepto, modelo_cloud, votos in _fetch_conceptos_cloud_libro(isbn):
+            concept_el = ET.SubElement(concepts_el, "concept", {
+                "id": str(id_concepto),
+                "model": modelo_cloud,
+                "votes": str(votos),
+            })
+            concept_el.text = nombre_concepto
+
+    return _xml_response(root)
+
+
+# ============================================================
+# 2. Detalle de un libro: xml -> conceptos cloud asociados,
 #    json -> tarjeta ("card") del libro.
 # ============================================================
 @rest_bp.route("/books/<isbn>", methods=["GET"])
@@ -201,7 +264,7 @@ def obtener_libro(isbn):
 
 
 # ============================================================
-# 2. Conceptos de Cloud Computing (IaaS/PaaS/SaaS/FaaS) junto con
+# 3. Conceptos de Cloud Computing (IaaS/PaaS/SaaS/FaaS) junto con
 #    los libros clasificados bajo cada uno.
 # ============================================================
 @rest_bp.route("/cloud-concepts", methods=["GET"])
@@ -238,7 +301,7 @@ def obtener_conceptos_cloud():
 
 
 # ============================================================
-# 3. Datos minimos de los libros junto con sus imagenes.
+# 4. Datos minimos de los libros junto con sus imagenes.
 # ============================================================
 @rest_bp.route("/books/gallery", methods=["GET"])
 def obtener_libros_con_imagenes():
@@ -251,7 +314,7 @@ def obtener_libros_con_imagenes():
                 "isbn": isbn,
                 "titulo": titulo,
                 "imagenes": imagenes,
-                "href": f"{request.host_url.rstrip('/')}/api/books/{isbn}",
+                "href": f"{request.host_url.rstrip('/')}/books/{isbn}",
             }
             for isbn, titulo, imagenes in libros
         ]
