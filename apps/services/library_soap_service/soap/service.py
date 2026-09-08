@@ -175,3 +175,24 @@ def obtener_progreso_usuario(correo_clasificador):
         "totalClasificados": total_clasificados,
         "totalPendientes": total_pendientes,
     }
+
+# ============================================================
+# 4. ObtenerEstadisticasPorModelo (Tarea 1 - protegida con WS-Security)
+# Conteo global (todos los clasificadores) por modelo Cloud.
+# ============================================================
+def obtener_estadisticas_por_modelo():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT modelo_cloud, COUNT(*)
+                FROM clasificaciones_cloud
+                GROUP BY modelo_cloud;
+                """
+            )
+            rows = dict(cur.fetchall())
+    finally:
+        conn.close()
+
+    return {modelo: rows.get(modelo, 0) for modelo in ("IaaS", "PaaS", "SaaS", "FaaS")}

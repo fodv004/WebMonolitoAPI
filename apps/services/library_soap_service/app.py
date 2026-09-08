@@ -15,8 +15,10 @@ from soap.envelope import (
 )
 from soap import service
 from soap import service, faults, security
+from api.rest import rest_bp
 
 app = Flask(__name__)
+app.register_blueprint(rest_bp)
 
 
 @app.route("/soap", methods=["POST"])

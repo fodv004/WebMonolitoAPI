@@ -23,12 +23,33 @@ class ClasificacionDuplicada(Exception):
 class AutenticacionInvalida(Exception):
     pass
 
+
+# ============================================================
+# Cambio 1 (docs/04_prompt_soap.md): excepciones de negocio para
+# las operaciones CRUD nuevas (libros/catalogos/usuarios), en el
+# mismo estilo que las 4 originales.
+# ============================================================
+class RegistroNoEncontrado(Exception):
+    pass
+
+
+class RegistroDuplicado(Exception):
+    pass
+
+
+class RestriccionIntegridad(Exception):
+    pass
+
+
 #acu
 _CASOS = {
     ConceptoInexistente: (400, "soap:Client", "Concepto inexistente.", "CONCEPTO_INEXISTENTE"),
     ModeloInvalido: (400, "soap:Client", "Modelo Cloud invalido.", "MODELO_INVALIDO"),
     ClasificacionDuplicada: (409, "soap:Client", "Clasificacion duplicada.", "DUPLICADO_409"),
     AutenticacionInvalida: (401, "soap:Client", "Autenticacion invalida.", "AUTENTICACION_INVALIDA"),
+    RegistroNoEncontrado: (404, "soap:Client", "Registro no encontrado.", "NO_ENCONTRADO"),
+    RegistroDuplicado: (409, "soap:Client", "Registro duplicado.", "DUPLICADO_409"),
+    RestriccionIntegridad: (409, "soap:Client", "Restriccion de integridad.", "RESTRICCION_INTEGRIDAD"),
 }
 
 
