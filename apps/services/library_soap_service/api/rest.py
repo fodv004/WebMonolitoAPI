@@ -90,9 +90,22 @@ def _fetch_todos_libros():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre
+                SELECT l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre,
+                       string_agg(DISTINCT a.nombre, ', ') AS autor,
+                       string_agg(DISTINCT g.nombre, ', ') AS genero,
+                       (
+                           SELECT i.url FROM imagenes i
+                           WHERE i.isbn = l.isbn
+                           ORDER BY i.es_principal DESC, i.orden ASC NULLS LAST
+                           LIMIT 1
+                       ) AS imagen_url
                 FROM libros l
                 JOIN formatos f ON f.id_formato = l.id_formato
+                LEFT JOIN libro_autor la ON la.isbn = l.isbn
+                LEFT JOIN autores a ON a.id_autor = la.id_autor
+                LEFT JOIN libro_genero lg ON lg.isbn = l.isbn
+                LEFT JOIN generos g ON g.id_genero = lg.id_genero
+                GROUP BY l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre
                 ORDER BY l.isbn
                 """
             )
@@ -186,21 +199,27 @@ def listar_libros():
                 "precio": float(precio),
                 "stock": stock,
                 "formato": formato_nombre,
-                "portada": _fetch_portada(isbn),
+                "autor": autor,
+                "genero": genero,
+                "portada": imagen_url,
+                "image_url": imagen_url,
                 "href": f"{request.host_url.rstrip('/')}/books/{isbn}",
             }
-            for isbn, titulo, anio, precio, stock, formato_nombre in libros
+            for isbn, titulo, anio, precio, stock, formato_nombre, autor, genero, imagen_url in libros
         ]
         return jsonify(cards), 200
 
     root = ET.Element("books")
-    for isbn, titulo, anio, precio, stock, formato_nombre in libros:
+    for isbn, titulo, anio, precio, stock, formato_nombre, autor, genero, imagen_url in libros:
         book_el = ET.SubElement(root, "book", {"isbn": isbn})
         ET.SubElement(book_el, "title").text = titulo
         ET.SubElement(book_el, "year").text = str(anio)
         ET.SubElement(book_el, "price").text = str(precio)
         ET.SubElement(book_el, "stock").text = str(stock)
         ET.SubElement(book_el, "format").text = formato_nombre
+        ET.SubElement(book_el, "author").text = autor
+        ET.SubElement(book_el, "genre").text = genero
+        ET.SubElement(book_el, "image_url").text = imagen_url
 
         concepts_el = ET.SubElement(book_el, "cloudConcepts")
         for id_concepto, nombre_concepto, modelo_cloud, votos in _fetch_conceptos_cloud_libro(isbn):
