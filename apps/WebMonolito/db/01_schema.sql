@@ -33,15 +33,38 @@ CREATE TABLE conceptos (
 -- 2. USUARIOS REGISTRADOS
 -- ============================================================
 
+-- Atómica (1FN): nombre, apellido_paterno y apellido_materno son columnas
+-- separadas. Las cuentas antiguas (migradas con cambio_usuarios.sql) pueden
+-- no tener apellidos; el registro nuevo (auth / monolito) los exige.
+-- password_hash vive aquí: no existe una tabla aparte de passwords.
 CREATE TABLE usuarios (
-    id_usuario      SERIAL PRIMARY KEY,
-    nombre          VARCHAR(150) NOT NULL,
-    correo          VARCHAR(150) NOT NULL UNIQUE,
-    password_hash   VARCHAR(255) NOT NULL,
-    es_admin        BOOLEAN NOT NULL DEFAULT FALSE,
-    fecha_registro  TIMESTAMP NOT NULL DEFAULT NOW(),
-    activo          BOOLEAN NOT NULL DEFAULT TRUE
+    id_usuario        SERIAL PRIMARY KEY,
+    nombre            VARCHAR(150) NOT NULL CONSTRAINT chk_usuarios_nombre_no_vacio CHECK (btrim(nombre) <> ''),
+    apellido_paterno  VARCHAR(100),
+    apellido_materno  VARCHAR(100),
+    correo            VARCHAR(150) NOT NULL UNIQUE,
+    password_hash     VARCHAR(255) NOT NULL,
+    es_admin          BOOLEAN NOT NULL DEFAULT FALSE,
+    fecha_registro    TIMESTAMP NOT NULL DEFAULT NOW(),
+    activo            BOOLEAN NOT NULL DEFAULT TRUE,
+    -- 'pendiente' hasta que el usuario abre el link de confirmación que envía
+    -- el microservicio de auth; solo las cuentas 'confirmado' pueden iniciar sesión.
+    estado_cuenta     VARCHAR(10) NOT NULL DEFAULT 'pendiente'
+                      CONSTRAINT chk_usuarios_estado_cuenta CHECK (estado_cuenta IN ('pendiente', 'confirmado'))
 );
+
+-- Control de versiones del esquema. Una instalación desde cero ya nace con la
+-- estructura de la migración 001 (cambio_usuarios.sql), así que se registra
+-- como aplicada y ese script queda como no-op.
+CREATE TABLE schema_migraciones (
+    version      VARCHAR(60) PRIMARY KEY,
+    descripcion  TEXT        NOT NULL,
+    aplicada_en  TIMESTAMP   NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO schema_migraciones (version, descripcion)
+VALUES ('001_usuarios_1fn',
+        'usuarios: nombre -> nombre + apellido_paterno + apellido_materno (1FN); estado_cuenta pendiente/confirmado');
 
 -- Regla de negocio: como máximo un administrador en todo el sistema.
 CREATE UNIQUE INDEX un_solo_admin

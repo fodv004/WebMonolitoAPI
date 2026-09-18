@@ -1,7 +1,12 @@
 const db = require('../config/db');
-exports.findByEmail = async correo => (await db.query('SELECT * FROM usuarios WHERE correo=$1 AND activo=TRUE', [correo])).rows[0];
-exports.list = async () => (await db.query('SELECT id_usuario,nombre,correo,es_admin,activo,fecha_registro FROM usuarios ORDER BY id_usuario')).rows;
-exports.get = async id => (await db.query('SELECT id_usuario,nombre,correo,es_admin,activo FROM usuarios WHERE id_usuario=$1',[id])).rows[0];
-exports.create = async ({nombre,correo,password_hash,es_admin=false}) => db.query('INSERT INTO usuarios(nombre,correo,password_hash,es_admin) VALUES($1,$2,$3,$4)',[nombre,correo,password_hash,es_admin]);
-exports.update = async (id,{nombre,correo,password_hash,es_admin,activo}) => { const columns=['nombre=$1','correo=$2','es_admin=$3','activo=$4']; const args=[nombre,correo,es_admin === 'on',activo === 'on']; if(password_hash){columns.push(`password_hash=$${args.length+1}`);args.push(password_hash);} args.push(id); return db.query(`UPDATE usuarios SET ${columns.join(',')} WHERE id_usuario=$${args.length}` ,args); };
+// Los apellidos son opcionales en BD (cuentas antiguas migradas): cadena vacía -> NULL.
+const vacioANull = v => (v && String(v).trim()) || null;
+exports.nombreCompleto = u => [u.nombre, u.apellido_paterno, u.apellido_materno].filter(Boolean).join(' ');
+exports.findByEmail = async correo => (await db.query('SELECT * FROM usuarios WHERE correo=LOWER(TRIM($1)) AND activo=TRUE', [correo])).rows[0];
+exports.list = async () => (await db.query('SELECT id_usuario,nombre,apellido_paterno,apellido_materno,correo,es_admin,activo,estado_cuenta,fecha_registro FROM usuarios ORDER BY id_usuario')).rows;
+exports.get = async id => (await db.query('SELECT id_usuario,nombre,apellido_paterno,apellido_materno,correo,es_admin,activo,estado_cuenta FROM usuarios WHERE id_usuario=$1',[id])).rows[0];
+// El monolito no envía correos de confirmación (eso es del microservicio de auth),
+// así que las cuentas creadas aquí (registro propio o alta por el administrador) nacen 'confirmado'.
+exports.create = async ({nombre,apellido_paterno,apellido_materno,correo,password_hash,es_admin=false,estado_cuenta='confirmado'}) => db.query('INSERT INTO usuarios(nombre,apellido_paterno,apellido_materno,correo,password_hash,es_admin,estado_cuenta) VALUES($1,$2,$3,$4,$5,$6,$7)',[nombre.trim(),vacioANull(apellido_paterno),vacioANull(apellido_materno),correo,password_hash,es_admin,estado_cuenta]);
+exports.update = async (id,{nombre,apellido_paterno,apellido_materno,correo,password_hash,es_admin,activo,estado_cuenta}) => { const columns=['nombre=$1','apellido_paterno=$2','apellido_materno=$3','correo=$4','es_admin=$5','activo=$6','estado_cuenta=$7']; const args=[nombre.trim(),vacioANull(apellido_paterno),vacioANull(apellido_materno),correo,es_admin === 'on',activo === 'on',estado_cuenta === 'pendiente' ? 'pendiente' : 'confirmado']; if(password_hash){columns.push(`password_hash=$${args.length+1}`);args.push(password_hash);} args.push(id); return db.query(`UPDATE usuarios SET ${columns.join(',')} WHERE id_usuario=$${args.length}` ,args); };
 exports.remove = async id => db.query('DELETE FROM usuarios WHERE id_usuario=$1',[id]);

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src * data: https: http:; style-src 'self' 'unsafe-inline'; script-src 'self';"
+    />
+    <title>Catalogo de Libreria</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Catalogo de Libreria</h1>
+      <button id="toggleConfig" class="btn-secondary" type="button">
+        Configuracion
+      </button>
+    </header>
+
+    <section id="configPanel" class="config-panel" hidden>
+      <form id="configForm">
+        <div class="field">
+          <label for="baseUrl">URL base del microservicio</label>
+          <input
+            id="baseUrl"
+            name="baseUrl"
+            type="text"
+            placeholder="http://34.51.96.249:5001"
+            required
+          />
+        </div>
+        <div class="field">
+          <label for="endpoint">Endpoint</label>
+          <input
+            id="endpoint"
+            name="endpoint"
+            type="text"
+            placeholder="/books"
+            required
+          />
+        </div>
+        <div class="field">
+          <label for="pageSize">Libros por pagina</label>
+          <select id="pageSize" name="pageSize">
+            <option value="6">6</option>
+            <option value="12" selected>12</option>
+            <option value="24">24</option>
+          </select>
+        </div>
+        <div class="field-actions">
+          <button type="submit" class="btn-primary">
+            Guardar y cargar catalogo
+          </button>
+          <button type="button" id="resetConfig" class="btn-secondary">
+            Restablecer valores por defecto
+          </button>
+        </div>
+        <p class="hint">
+          La configuracion se guarda en este equipo (LocalStorage) y se
+          reutiliza la proxima vez que abras la aplicacion. El catalogo se
+          consume siempre como XML.
+        </p>
+      </form>
+    </section>
+
+    <section class="toolbar">
+      <div class="toolbar-info">
+        <span id="statusText">Cargando catalogo...</span>
+      </div>
+      <button id="reloadBtn" class="btn-secondary" type="button">
+        Recargar
+      </button>
+    </section>
+
+    <main id="catalog" class="catalog" aria-live="polite"></main>
+
+    <footer class="pagination">
+      <button id="prevPage" class="btn-secondary" type="button">
+        &laquo; Anterior
+      </button>
+      <span id="pageIndicator">Pagina 1 de 1</span>
+      <button id="nextPage" class="btn-secondary" type="button">
+        Siguiente &raquo;
+      </button>
+    </footer>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

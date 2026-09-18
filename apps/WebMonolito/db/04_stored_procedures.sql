@@ -81,17 +81,27 @@ $$ LANGUAGE plpgsql;
 -- sp_registrar_usuario: registra un usuario nuevo. Recibe el
 -- password_hash ya generado por la aplicación (bcrypt) — la
 -- función NO hashea contraseñas, solo persiste el registro.
+-- Nombre atómico (1FN): nombre + apellido paterno + apellido materno.
+-- La cuenta nace 'pendiente' salvo que se indique otro estado.
+-- (Misma definición que en cambio_usuarios.sql; la firma anterior
+-- de 3 parámetros ya no existe.)
 -- ------------------------------------------------------------
+DROP FUNCTION IF EXISTS sp_registrar_usuario(VARCHAR, VARCHAR, VARCHAR);
 CREATE OR REPLACE FUNCTION sp_registrar_usuario(
-    p_nombre VARCHAR(150),
-    p_correo VARCHAR(150),
-    p_password_hash VARCHAR(255)
+    p_nombre           VARCHAR(150),
+    p_apellido_paterno VARCHAR(100),
+    p_apellido_materno VARCHAR(100),
+    p_correo           VARCHAR(150),
+    p_password_hash    VARCHAR(255),
+    p_estado_cuenta    VARCHAR(10) DEFAULT 'pendiente'
 ) RETURNS INTEGER AS $$
 DECLARE
     v_id_usuario INTEGER;
 BEGIN
-    INSERT INTO usuarios (nombre, correo, password_hash, es_admin)
-    VALUES (p_nombre, p_correo, p_password_hash, FALSE)
+    INSERT INTO usuarios (nombre, apellido_paterno, apellido_materno, correo,
+                          password_hash, es_admin, estado_cuenta)
+    VALUES (p_nombre, p_apellido_paterno, p_apellido_materno, p_correo,
+            p_password_hash, FALSE, p_estado_cuenta)
     RETURNING id_usuario INTO v_id_usuario;
 
     RETURN v_id_usuario;

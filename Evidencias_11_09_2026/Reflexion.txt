@@ -1,0 +1,9 @@
+Se tiene que hacer de esta manera porque la aplicación de Electron no debe de saber nada de cómo está armada la base de 
+datos ni de cómo se obtienen los datos, solo le tiene que importar el XML que le manda el microservicio SOAP, ya que si 
+mañana cambio algo de la base de datos o de cómo hago las consultas, la app de escritorio ni se entera porque solo depende
+del formato del XML y no de la implementación interna. Además, al pedir que la URL y el endpoint sean configurables y que 
+se guarden en LocalStorage, la app puede apuntar a cualquier servidor sin tener que modificar el código, por ejemplo hoy 
+usa la IP de mi VM de desarrollo pero después podría apuntar a otro servidor sin tocar nada más que la configuración. 
+También es importante hacer la carga con paginación y por petición en vez de traer todo el catálogo de un jalón, porque 
+el microservicio es el que tiene el control real de los datos y no se debe de asumir que el catálogo va a ser siempre 
+chico o que se puede guardar todo localmente.

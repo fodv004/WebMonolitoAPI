@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if estado in ('ok', 'already') %}Cuenta activada{% else %}No se pudo confirmar{% endif %} · Librería</title>
+  <style>
+    :root { --bg:#f3f4f6; --card:#ffffff; --text:#111827; --muted:#6b7280; --ok:#15803d; --ok-bg:#dcfce7; --bad:#b91c1c; --bad-bg:#fee2e2; --warn:#b45309; --warn-bg:#fef3c7; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#111827; --card:#1f2937; --text:#f9fafb; --muted:#9ca3af; --ok:#4ade80; --ok-bg:#14532d; --bad:#f87171; --bad-bg:#7f1d1d; --warn:#fbbf24; --warn-bg:#78350f; }
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:16px; background:var(--bg); color:var(--text);
+           font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+    main { width:100%; max-width:440px; background:var(--card); border-radius:16px; padding:40px 32px; text-align:center;
+           box-shadow:0 10px 30px rgba(0,0,0,.12); }
+    .icon { width:84px; height:84px; margin:0 auto 20px; border-radius:50%; display:grid; place-items:center; font-size:44px; font-weight:700; }
+    .ok   .icon { background:var(--ok-bg);   color:var(--ok); }
+    .bad  .icon { background:var(--bad-bg);  color:var(--bad); }
+    .warn .icon { background:var(--warn-bg); color:var(--warn); }
+    h1 { margin:0 0 10px; font-size:1.6rem; }
+    p  { margin:0; color:var(--muted); line-height:1.5; }
+    .brand { margin-top:28px; font-size:.85rem; color:var(--muted); }
+  </style>
+</head>
+<body>
+  {% if estado == 'ok' %}
+  <main class="ok" role="status">
+    <div class="icon" aria-hidden="true">&#10003;</div>
+    <h1>¡Cuenta activada!</h1>
+    <p>Tu correo quedó confirmado. Ya puedes iniciar sesión en la Librería.</p>
+  {% elif estado == 'already' %}
+  <main class="ok" role="status">
+    <div class="icon" aria-hidden="true">&#10003;</div>
+    <h1>Tu cuenta ya está activada</h1>
+    <p>Este enlace ya se había usado. Puedes iniciar sesión con tu correo y contraseña.</p>
+  {% elif estado == 'expired' %}
+  <main class="warn" role="alert">
+    <div class="icon" aria-hidden="true">!</div>
+    <h1>El enlace expiró</h1>
+    <p>El enlace de confirmación ya no es válido. Vuelve a registrarte para recibir uno nuevo.</p>
+  {% else %}
+  <main class="bad" role="alert">
+    <div class="icon" aria-hidden="true">&#10007;</div>
+    <h1>Enlace no válido</h1>
+    <p>No pudimos confirmar tu cuenta con este enlace. Revisa que lo hayas copiado completo.</p>
+  {% endif %}
+    <p class="brand">Librería · Servicio de autenticación</p>
+  </main>
+</body>
+</html>

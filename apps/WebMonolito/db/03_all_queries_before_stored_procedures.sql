@@ -10,9 +10,11 @@
 -- ------------------------------------------------------------
 -- LOGIN: buscar usuario por correo (authController.login)
 -- ------------------------------------------------------------
-SELECT id_usuario, nombre, correo, password_hash, es_admin, activo
+SELECT id_usuario, nombre, apellido_paterno, apellido_materno, correo,
+       password_hash, es_admin, activo, estado_cuenta
 FROM usuarios
-WHERE correo = 'admin@libreria.com';
+WHERE correo = 'admin@libreria.com'
+  AND estado_cuenta = 'confirmado';
 
 -- ------------------------------------------------------------
 -- CATÁLOGO: listar libros con formato, autores y géneros (RF-04)
@@ -100,8 +102,8 @@ WHERE isbn = '9780000000001' AND id_genero = 1;
 -- ------------------------------------------------------------
 -- REGISTRO de usuario nuevo (RF-01)
 -- ------------------------------------------------------------
-INSERT INTO usuarios (nombre, correo, password_hash, es_admin)
-VALUES ('Usuario de prueba', 'prueba@libreria.com', '$2b$12$hashDeEjemploGeneradoPorBcrypt', FALSE);
+INSERT INTO usuarios (nombre, apellido_paterno, apellido_materno, correo, password_hash, es_admin, estado_cuenta)
+VALUES ('Usuario', 'de Prueba', 'Ejemplo', 'prueba@libreria.com', '$2b$12$hashDeEjemploGeneradoPorBcrypt', FALSE, 'pendiente');
 
 -- ------------------------------------------------------------
 -- CRUD de catálogos independientes: crear un autor nuevo (RF-06)

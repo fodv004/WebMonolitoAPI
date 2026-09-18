@@ -33,15 +33,29 @@ CREATE TABLE conceptos (
 -- 2. USUARIOS REGISTRADOS
 -- ============================================================
 
+-- Nombre atómico (1FN): mismas columnas que db/01_schema.sql tras cambio_usuarios.sql.
 CREATE TABLE usuarios (
-    id_usuario      SERIAL PRIMARY KEY,
-    nombre          VARCHAR(150) NOT NULL,
-    correo          VARCHAR(150) NOT NULL UNIQUE,
-    password_hash   VARCHAR(255) NOT NULL,
-    es_admin        BOOLEAN NOT NULL DEFAULT FALSE,
-    fecha_registro  TIMESTAMP NOT NULL DEFAULT NOW(),
-    activo          BOOLEAN NOT NULL DEFAULT TRUE
+    id_usuario        SERIAL PRIMARY KEY,
+    nombre            VARCHAR(150) NOT NULL CONSTRAINT chk_usuarios_nombre_no_vacio CHECK (btrim(nombre) <> ''),
+    apellido_paterno  VARCHAR(100),
+    apellido_materno  VARCHAR(100),
+    correo            VARCHAR(150) NOT NULL UNIQUE,
+    password_hash     VARCHAR(255) NOT NULL,
+    es_admin          BOOLEAN NOT NULL DEFAULT FALSE,
+    fecha_registro    TIMESTAMP NOT NULL DEFAULT NOW(),
+    activo            BOOLEAN NOT NULL DEFAULT TRUE,
+    estado_cuenta     VARCHAR(10) NOT NULL DEFAULT 'pendiente'
+                      CONSTRAINT chk_usuarios_estado_cuenta CHECK (estado_cuenta IN ('pendiente', 'confirmado'))
 );
+
+-- Control de versiones del esquema (esta instalación ya incluye la migración 001).
+CREATE TABLE schema_migraciones (
+    version      VARCHAR(60) PRIMARY KEY,
+    descripcion  TEXT        NOT NULL,
+    aplicada_en  TIMESTAMP   NOT NULL DEFAULT NOW()
+);
+INSERT INTO schema_migraciones (version, descripcion)
+VALUES ('001_usuarios_1fn', 'usuarios: nombre -> nombre + apellido_paterno + apellido_materno (1FN); estado_cuenta pendiente/confirmado');
 
 -- Regla de negocio: como máximo un administrador en todo el sistema.
 -- El índice único parcial solo indexa filas con es_admin = TRUE,
@@ -123,15 +137,15 @@ INSERT INTO generos (nombre) VALUES ('Ficción'), ('Ciencia'), ('Historia'), ('R
 INSERT INTO autores (nombre, nacionalidad) VALUES ('Gabriel García Márquez', 'Colombiana'), ('Isabel Allende', 'Chilena');
 INSERT INTO conceptos (nombre) VALUES ('Realismo mágico'), ('Soledad'), ('Memoria histórica');
 
-INSERT INTO usuarios (nombre, correo, password_hash, es_admin)
-VALUES ('Admin Principal', 'admin@libreria.com', 'hash_de_ejemplo', TRUE);
+INSERT INTO usuarios (nombre, apellido_paterno, correo, password_hash, es_admin, estado_cuenta)
+VALUES ('Admin', 'Principal', 'admin@libreria.com', 'hash_de_ejemplo', TRUE, 'confirmado');
 
 -- Usuario de demostración con contraseña SIN hashear (texto plano).
 -- El login detecta que password_hash no tiene formato bcrypt y compara en texto plano,
 -- permitiendo entrar al catálogo/búsqueda sin depender de un hash generado previamente.
 -- Uso exclusivo de pruebas/demo: no usar este patrón para cuentas reales en producción.
-INSERT INTO usuarios (nombre, correo, password_hash, es_admin)
-VALUES ('Usuario Demo', 'demo@libreria.com', 'demo1234', FALSE);
+INSERT INTO usuarios (nombre, apellido_paterno, correo, password_hash, es_admin, estado_cuenta)
+VALUES ('Usuario', 'Demo', 'demo@libreria.com', 'demo1234', FALSE, 'confirmado');
 
 INSERT INTO libros (isbn, titulo, anio_publicacion, precio, stock, id_formato)
 VALUES ('9780307474728', 'Cien años de soledad', 1967, 350.00, 20, 1);

@@ -1,0 +1,24 @@
+{
+  "name": "libreria-catalogo-electron",
+  "version": "1.0.0",
+  "description": "Aplicacion de escritorio (Electron) para Windows 11 que muestra el catalogo de libros consumiendo XML del microservicio de la libreria.",
+  "main": "main.js",
+  "author": "Fernando Olivares",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.eg4.libreriacatalogo",
+    "productName": "Catalogo de Libreria",
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

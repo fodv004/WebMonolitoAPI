@@ -1,0 +1,375 @@
+=====================================================================
+ LIBRERÍA EN LÍNEA (EG4) - CÓMO EJECUTAR TODO Y CÓMO VERIFICARLO
+=====================================================================
+
+Componentes y puertos
+---------------------------------------------------------------------
+  Componente                         Carpeta                              Puerto
+  ---------------------------------  -----------------------------------  ------
+  PostgreSQL (base "library")        -                                    5432
+  Monolito web (Node/Express)        apps/WebMonolito                     3000
+  Microservicio de AUTH (Flask)      apps/services/login                  5000
+  Microservicio de LIBROS (Flask)    apps/services/library_soap_service   5001
+  Mailpit  SMTP (envío de correos)   -                                    1025
+  Mailpit  interfaz web              -                                    8025
+  App de escritorio Electron         apps/Electron_app                    (cliente)
+
+Los servicios son independientes: cada uno arranca por separado, usa su
+propio rol de PostgreSQL con mínimo privilegio y NO comparten rutas:
+
+  AUTH (5000):   /register  /login  /logout  /session  /health
+                 /confirm   /confirmed      /apidocs/
+  LIBROS (5001): /books  /books/<isbn>  /books/gallery  /cloud-concepts  /soap
+  MONOLITO(3000): /login /registro /logout /libros /usuarios /catalogos/...
+
+Electron solo consume  GET /books  (XML) del servicio de LIBROS; el
+servicio de AUTH no lo afecta.
+
+Convención de contraseñas de DESARROLLO usadas en estas instrucciones
+(cámbialas en cualquier despliegue real y actualiza los .env):
+  library_user / library666      (dueño de la BD; monolito y servicio de libros)
+  auth_user    / auth666         (microservicio de auth)
+  soap_user    / soap666         (rol de mínimo privilegio del módulo SOAP)
+
+Base de datos: se llama  library  (así lo indican los .env.example).
+Nota: db/00_create_database.sql crea "library_db"; si usas ese nombre,
+cámbialo en los comandos de abajo y en los DB_NAME de los .env.
+
+
+=====================================================================
+ PARTE 1 - BASE DE DATOS  (hacer esto PRIMERO)
+=====================================================================
+
+Windows: abre PowerShell y ajusta el PATH y la codificación (sin esto los
+acentos de los .sql se guardan mal):
+
+  $env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+  $env:PGCLIENTENCODING = "UTF8"
+
+Linux (CentOS): usa psql directamente, como usuario con acceso a postgres.
+En los comandos se omite -h/-p (localhost:5432). Te pedirá la contraseña
+de cada rol (o exporta PGPASSWORD=...).
+
+Elige UNA de las dos rutas:
+
+---------------------------------------------------------------------
+ RUTA A - Instalación desde cero (BD vacía)
+---------------------------------------------------------------------
+  cd apps\WebMonolito\db
+
+  psql -U postgres -c "CREATE ROLE library_user LOGIN PASSWORD 'library666';"
+  psql -U postgres -c "CREATE DATABASE library OWNER library_user ENCODING 'UTF8' TEMPLATE template0;"
+
+  # esquema (ya incluye usuarios con nombre atómico + estado_cuenta),
+  # datos de ejemplo, procedimientos, triggers y vistas:
+  psql -U library_user -d library -f 01_schema.sql
+  psql -U library_user -d library -f 02_seed_30_per_table.sql
+  psql -U library_user -d library -f 04_stored_procedures.sql
+  psql -U library_user -d library -f 05_triggers.sql
+  psql -U library_user -d library -f 06_views.sql
+  (03_all_queries_before_stored_procedures.sql es solo un archivo de
+   consultas de ejemplo; no hace falta ejecutarlo.)
+
+  # módulo del servicio de LIBROS/SOAP:
+  cd ..\..\services\library_soap_service\sql
+  psql -U library_user -d library -f soap_module.sql
+  psql -U postgres     -d library -f soap_roles.sql
+  psql -U postgres     -d library -f soap_module_crud_grants.sql
+
+  # módulo del servicio de AUTH:
+  cd ..\..\login\sql
+  psql -U library_user -d library -f auth_module.sql
+  psql -U postgres     -d library -f auth_roles.sql
+
+  (La migración cambio_usuarios.sql NO hace falta en esta ruta: 01_schema.sql
+   ya crea la estructura final y la registra como aplicada.)
+
+---------------------------------------------------------------------
+ RUTA B - La BD "library" ya existe con usuarios (caso normal)
+---------------------------------------------------------------------
+  1) RESPALDO antes de tocar nada:
+       pg_dump -U library_user -d library -Fc -f library_antes_1fn.dump
+
+  2) MIGRACIÓN 1FN de usuarios (debe correr ANTES de auth y del monolito nuevo):
+       cd apps\WebMonolito\db
+       psql -U library_user -d library -f cambio_usuarios.sql
+     Es transaccional (si algo falla no se aplica nada) e idempotente
+     (una segunda ejecución no vuelve a partir los nombres). Debe imprimir:
+       NOTICE:  Nombres migrados y verificados: N usuario(s)
+
+  3) VALIDACIÓN de la migración:
+       psql -U library_user -d library -c "SELECT * FROM schema_migraciones;"
+         -> debe listar 001_usuarios_1fn
+       psql -U library_user -d library -c "SELECT COUNT(*) total, COUNT(apellido_paterno) con_paterno, COUNT(*) FILTER (WHERE estado_cuenta='confirmado') confirmados FROM usuarios;"
+         -> con el seed original: total=30, con_paterno=30, confirmados=30
+       psql -U library_user -d library -c "SELECT id_usuario, nombre, apellido_paterno, apellido_materno, estado_cuenta FROM usuarios ORDER BY 1 LIMIT 8;"
+         -> 'María Fernanda López' quedó como  María Fernanda | López | (vacío)
+       psql -U library_user -d library -c "SELECT * FROM vista_usuarios_admin LIMIT 3;"
+
+  4) Tablas y rol del servicio de AUTH:
+       cd ..\..\services\login\sql
+       psql -U library_user -d library -f auth_module.sql
+       psql -U postgres     -d library -f auth_roles.sql
+
+  5) Si el servicio de LIBROS aún no tiene su módulo (tablas clasificadores,
+     etc.), ejecuta también los 3 scripts soap_* de la RUTA A.
+
+Cómo se separan los nombres existentes (heurística, no hay diccionario):
+  1 palabra          -> nombre
+  2 o 3 palabras     -> última = apellido paterno, el resto = nombre
+                        ('María Fernanda López' -> María Fernanda | López)
+  4 o más palabras   -> penúltima = paterno, última = materno, resto = nombre
+  Partículas (de, del, la, los, san...) se pegan al apellido que las sigue.
+Casos ambiguos (p. ej. 'Juan Pérez López' queda como nombre 'Juan Pérez',
+paterno 'López') y el apellido materno faltante se corrigen desde el
+monolito: Usuarios -> Editar. Ningún dato se pierde: la migración verifica
+que nombre + apellidos reconstruye exactamente el nombre original.
+
+Contraseñas de los usuarios sembrados:
+  - El admin del seed trae 'CAMBIAR_POR_HASH_BCRYPT_REAL'. Genera un hash real:
+      node -e "require('bcrypt').hash('UnaClaveSegura',12).then(console.log)"
+    y  UPDATE usuarios SET password_hash='<hash>' WHERE correo='admin@libreria.com';
+  - Los 29 usuarios de demo tienen 'demo1234' en TEXTO PLANO (el monolito lo
+    tolera). El microservicio de AUTH NO acepta contraseñas en texto plano:
+    con esas cuentas devuelve 401. Para probar AUTH usa cuentas registradas
+    con POST /register (o cuentas con hash bcrypt).
+
+
+=====================================================================
+ PARTE 2 - MAILPIT (servidor de correo propio; no se usa Gmail)
+=====================================================================
+El microservicio de auth envía por SMTP a localhost:1025 y los correos se
+ven en la interfaz web http://localhost:8025
+
+Windows:
+  1) Descarga mailpit-windows-amd64.zip de
+     https://github.com/axllent/mailpit/releases  y descomprímelo.
+  2) En esa carpeta:
+       .\mailpit.exe --smtp 127.0.0.1:1025 --listen 127.0.0.1:8025
+  3) Abre http://localhost:8025  (bandeja vacía al inicio).
+
+Linux / CentOS Stream 10 (la instancia de GCP):
+  1) Instalar (script oficial del proyecto):
+       sudo sh -c "$(curl -sL https://raw.githubusercontent.com/axllent/mailpit/develop/install.sh)"
+  2) Servicio systemd  /etc/systemd/system/mailpit.service :
+       [Unit]
+       Description=Mailpit
+       After=network.target
+       [Service]
+       ExecStart=/usr/local/bin/mailpit --smtp 127.0.0.1:1025 --listen 127.0.0.1:8025
+       Restart=always
+       [Install]
+       WantedBy=multi-user.target
+       (se dejan ambos puertos solo en 127.0.0.1: la interfaz de Mailpit no
+        tiene contraseña, no la publiques a internet)
+  3) sudo systemctl daemon-reload && sudo systemctl enable --now mailpit
+  4) Para ver la interfaz desde tu PC usa un túnel SSH:
+       gcloud compute ssh USUARIO@NOMBRE_VM -- -L 8025:localhost:8025
+     y abre http://localhost:8025 en tu navegador.
+
+
+=====================================================================
+ PARTE 3 - MICROSERVICIO DE AUTENTICACIÓN  (puerto 5000)
+=====================================================================
+  cd apps\services\login
+  python -m venv .venv
+  .\.venv\Scripts\python.exe -m pip install -r requirements.txt     (Linux: .venv/bin/python)
+  copy .env.example .env                                            (Linux: cp)
+
+Edita .env:
+  SECRET_KEY=        -> genera una:  python -c "import secrets; print(secrets.token_hex(32))"
+  DB_*               -> deja localhost / library / auth_user / auth666
+  PUBLIC_BASE_URL    -> URL con la que TU NAVEGADOR alcanza este servicio; se usa
+                        para armar el link del correo (/confirm?token=...).
+                        Local: http://localhost:5000
+                        Instancia GCP: http://IP_PUBLICA_DE_LA_VM:5000
+  SMTP_HOST/PORT     -> localhost / 1025 (Mailpit)
+
+Arrancar:
+  .\.venv\Scripts\python.exe app.py        (Linux: .venv/bin/python app.py)
+  -> "Running on http://127.0.0.1:5000"
+
+En la instancia GCP abre el puerto:
+  gcloud compute firewall-rules create allow-auth-5000 --allow tcp:5000
+  sudo firewall-cmd --permanent --add-port=5000/tcp && sudo firewall-cmd --reload
+  (Para dejarlo corriendo tras cerrar la sesión SSH usa systemd o "nohup".)
+
+Swagger (documentación XML/JSON):  http://localhost:5000/apidocs/
+
+
+=====================================================================
+ PARTE 4 - MICROSERVICIO DE LIBROS  (puerto 5001)  [el que usa Electron]
+=====================================================================
+  cd apps\services\library_soap_service
+  python -m venv .venv
+  .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+  (revisa .env: DB_NAME=library, DB_USER, DB_PASSWORD, FLASK_PORT=5001)
+  .\.venv\Scripts\python.exe app.py
+  -> http://localhost:5001/books
+
+
+=====================================================================
+ PARTE 5 - MONOLITO WEB  (puerto 3000)
+=====================================================================
+  cd apps\WebMonolito
+  npm install
+  copy .env.example .env      (DB_NAME=library, DB_USER=library_user, DB_PASSWORD=library666,
+                               cambia SESSION_SECRET)
+  npm start
+  -> http://localhost:3000   (pantalla de login)
+
+Cuentas: admin@libreria.com (con el hash que hayas puesto) o cualquier
+usuario de demo, p. ej. maria.lopez@libreria.com / demo1234.
+
+
+=====================================================================
+ PARTE 6 - APP DE ESCRITORIO ELECTRON (Windows 11)
+=====================================================================
+Requiere Node.js LTS (node -v, npm -v).
+  cd apps\Electron_app
+  npm install                (descarga Electron; tarda unos minutos)
+  npm start
+
+Por defecto consume http://34.51.96.249:5001/books. Para usar tu servicio local:
+  botón "Configuración" -> URL base = http://localhost:5001 , Endpoint = /books
+  -> "Guardar y cargar catálogo".
+
+
+=====================================================================
+ PARTE 7 - VERIFICACIÓN
+=====================================================================
+
+7.1  Verificación automática del microservicio de AUTH (recomendada)
+---------------------------------------------------------------------
+Con PostgreSQL, Mailpit y el servicio de auth en marcha:
+  cd apps\services\login
+  .\.venv\Scripts\python.exe tests\validar_endpoints.py
+  (contra la VM:  ... --base http://IP:5000 --mailpit http://IP:8025 )
+Resultado esperado: "61/61 comprobaciones correctas" y código de salida 0.
+Cubre: /health, /register (validaciones, XML y JSON, email duplicado),
+llegada del correo a Mailpit, /confirm, /confirmed, /login (antes y después
+de confirmar), /session, /logout y la especificación Swagger.
+
+7.2  Verificación manual del microservicio de AUTH (con evidencia visual)
+---------------------------------------------------------------------
+Todos los endpoints aceptan ?format=xml | ?format=json (XML si se omite).
+
+ a) Salud:   http://localhost:5000/health            -> XML
+             http://localhost:5000/health?format=json -> JSON
+             Esperado: database.status = up.
+             (Apaga PostgreSQL un momento: debe responder 503.)
+
+ b) Swagger: http://localhost:5000/apidocs/
+             Cada endpoint muestra los formatos application/xml y
+             application/json y el parámetro "format". Usa "Try it out".
+
+ c) Registro (Swagger -> POST /register -> Try it out) con:
+      { "nombre":"Ana", "apellido_paterno":"Pérez", "apellido_materno":"Ruiz",
+        "email":"ana@correo.com", "password":"MiClaveSegura123" }
+    Esperado: 201, estado_cuenta = pendiente.
+    Repite el mismo email -> 409 EMAIL_DUPLICADO.
+    Email mal escrito o password de menos de 8 caracteres -> 400 con el detalle.
+
+ d) Correo:  abre http://localhost:8025 -> debe aparecer "Confirma tu cuenta en la
+             Librería" para ana@correo.com con el botón/enlace
+             http://.../confirm?token=...   (evidencia del envío por Mailpit)
+
+ e) Login antes de confirmar: POST /login con ese email y password
+    -> 403 CUENTA_NO_CONFIRMADA.   Password incorrecto -> 401.
+
+ f) Confirmar: haz clic en el enlace del correo. Debe redirigir a
+    /confirmed?status=ok y mostrar la página verde "¡Cuenta activada!".
+    Un segundo clic muestra "Tu cuenta ya está activada"; un token alterado
+    muestra "Enlace no válido".
+    En la BD:  SELECT estado_cuenta FROM usuarios WHERE correo='ana@correo.com';
+               -> confirmado
+
+ g) Login:    POST /login -> 200 LOGIN_EXITOSO. El navegador guarda la cookie
+              "auth_session" (F12 -> Application/Almacenamiento -> Cookies).
+    Sesión:   GET /session (misma pestaña/navegador) -> authenticated = true
+    Logout:   POST /logout -> 200;   GET /session -> authenticated = false
+
+ h) La contraseña NUNCA queda en texto plano:
+      SELECT correo, left(password_hash,7) AS prefijo, length(password_hash) FROM usuarios WHERE correo='ana@correo.com';
+      -> prefijo $2b$12$ , longitud 60
+
+ Equivalente por línea de comandos (PowerShell):
+   $B = "http://localhost:5000"
+   $reg = @{ nombre="Ana"; apellido_paterno="Pérez"; apellido_materno="Ruiz"; email="ana@correo.com"; password="MiClaveSegura123" } | ConvertTo-Json
+   $bytes = [Text.Encoding]::UTF8.GetBytes($reg)
+   (Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$B/register" -ContentType "application/json; charset=utf-8" -Body $bytes).Content
+   (Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$B/register?format=json" -ContentType "application/json; charset=utf-8" -Body $bytes).Content
+   # (PowerShell lanza excepción en 4xx; el cuerpo está en $_.ErrorDetails.Message)
+   # Login + sesión con cookie:
+   $login = @{ email="ana@correo.com"; password="MiClaveSegura123" } | ConvertTo-Json
+   Invoke-RestMethod -Method Post -Uri "$B/login?format=json" -ContentType "application/json" -Body $login -SessionVariable s
+   Invoke-RestMethod -Uri "$B/session?format=json" -WebSession $s
+   Invoke-RestMethod -Method Post -Uri "$B/logout?format=json" -WebSession $s
+
+ Equivalente en Linux / Git Bash (curl):
+   curl -s -X POST "http://localhost:5000/register?format=json" -H "Content-Type: application/json" \
+        -d '{"nombre":"Ana","apellido_paterno":"Pérez","apellido_materno":"Ruiz","email":"ana@correo.com","password":"MiClaveSegura123"}'
+   curl -s -c cookies.txt -X POST "http://localhost:5000/login" -H "Content-Type: application/json" -d '{"email":"ana@correo.com","password":"MiClaveSegura123"}'
+   curl -s -b cookies.txt "http://localhost:5000/session"
+   curl -s -b cookies.txt -X POST "http://localhost:5000/logout?format=json"
+
+7.3  Verificación del microservicio de LIBROS
+---------------------------------------------------------------------
+   http://localhost:5001/books                 -> XML con todos los libros
+   http://localhost:5001/books?format=json     -> JSON (tarjetas)
+   http://localhost:5001/books/9780000000001   -> detalle de un libro
+   http://localhost:5001/cloud-concepts        -> conceptos cloud
+Esperado: responde igual que antes de la migración 1FN (no usa las columnas
+que cambiaron). Comprobación de que AUTH y LIBROS no chocan:
+   http://localhost:5000/books  -> 404      http://localhost:5001/login -> 404
+
+7.4  Verificación del MONOLITO con la tabla usuarios normalizada
+---------------------------------------------------------------------
+ a) http://localhost:3000/registro pide Nombre, Apellido paterno y Apellido
+    materno (ya no un "nombre completo"). Regístrate y entra: el nombre
+    completo aparece arriba a la derecha.
+ b) Como administrador: Usuarios -> la tabla muestra Nombre / Apellido
+    paterno / Apellido materno / Correo / Rol / Activo / Cuenta. Edita un
+    usuario migrado y agrégale su apellido materno.
+ c) Cuenta creada por el microservicio de AUTH:
+      - pendiente  -> el monolito rechaza el login con "Tu cuenta aún no
+        está confirmada...";
+      - confirmada -> entra al monolito con la MISMA contraseña (ambos usan
+        bcrypt). Y a la inversa: una cuenta registrada en el monolito inicia
+        sesión en POST /login del servicio de AUTH.
+
+7.5  Verificación de la app ELECTRON
+---------------------------------------------------------------------
+ 1) Con el servicio de LIBROS activo (7.3), ejecuta:  npm start  en apps\Electron_app
+ 2) Debe mostrarse el catálogo en tarjetas: imagen, autor(es), ISBN, stock,
+    año de publicación, género y precio, con paginación (Anterior/Siguiente)
+    y tamaño de página 6/12/24.
+ 3) Configuración: cambia URL base/endpoint (p. ej. http://localhost:5001 y
+    /books), guarda, cierra la app y ábrela otra vez -> la configuración
+    persiste (localStorage). "Restablecer valores por defecto" regresa a
+    http://34.51.96.249:5001/books.
+ 4) Solo consume XML: en Configuración pon el Endpoint  /books?format=json
+    y guarda. La app debe mostrar en la barra de estado "Error al procesar
+    el XML: La respuesta del servidor no es un XML válido." (rechaza JSON).
+    Devuelve el Endpoint a  /books  y el catálogo vuelve a cargar.
+ 5) Apaga el servicio de LIBROS y pulsa recargar: la barra de estado muestra
+    "Error al cargar el catálogo: ..." (sin congelarse); al encenderlo de
+    nuevo y recargar, vuelve el catálogo.
+ 6) Confirma que el servicio de AUTH activo no cambia nada en Electron.
+
+
+=====================================================================
+ SOLUCIÓN DE PROBLEMAS
+=====================================================================
+ - 503 CORREO_NO_ENVIADO al registrar      -> Mailpit no está en localhost:1025.
+                                              No queda ningún usuario a medias; reintenta.
+ - 503 BASE_DE_DATOS_NO_DISPONIBLE         -> PostgreSQL apagado o DB_* incorrectos en .env.
+ - "permission denied for table usuarios"  -> falta ejecutar sql/auth_roles.sql (o se usó otro rol).
+ - relation "tokens_confirmacion" does not exist -> falta sql/auth_module.sql.
+ - column "estado_cuenta" does not exist   -> falta WebMonolito/db/cambio_usuarios.sql.
+ - Acentos raros en los datos (Windows)    -> ejecuta $env:PGCLIENTENCODING="UTF8" antes de psql.
+ - El link del correo no abre desde otra PC -> PUBLIC_BASE_URL debe ser la IP/host alcanzable
+                                              y el puerto 5000 estar abierto en el firewall.
+ - Puerto ocupado (5000/5001/3000)         -> cambia FLASK_PORT / PORT en el .env del servicio.
+ - Reiniciar el servicio de AUTH sin SECRET_KEY invalida las sesiones abiertas;
+   define SECRET_KEY en .env.

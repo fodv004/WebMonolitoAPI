@@ -46,13 +46,19 @@ JOIN conceptos c ON c.id_concepto = lc.id_concepto;
 -- vista_usuarios_admin: listado de usuarios para el panel de
 -- administración, sin exponer el password_hash.
 -- ------------------------------------------------------------
-CREATE OR REPLACE VIEW vista_usuarios_admin AS
+-- (Misma definición que en cambio_usuarios.sql.)
+DROP VIEW IF EXISTS vista_usuarios_admin;
+CREATE VIEW vista_usuarios_admin AS
 SELECT
     id_usuario,
     nombre,
+    apellido_paterno,
+    apellido_materno,
+    concat_ws(' ', nombre, apellido_paterno, apellido_materno) AS nombre_completo,
     correo,
     es_admin,
     activo,
+    estado_cuenta,
     fecha_registro
 FROM usuarios
 ORDER BY fecha_registro DESC;

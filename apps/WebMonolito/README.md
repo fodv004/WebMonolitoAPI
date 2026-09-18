@@ -21,6 +21,17 @@ Aplicación Node.js monolítica con MVC, Express, EJS y acceso directo a Postgre
 
 Esto conserva 4NF: autores, géneros, conceptos e imágenes no se repiten como grupos dentro de `libros`.
 
+## Usuarios: nombre atómico (1FN) y estado de la cuenta
+
+La tabla `usuarios` guarda `nombre`, `apellido_paterno` y `apellido_materno` en columnas separadas, y `estado_cuenta` (`pendiente` / `confirmado`). El registro y el alta de usuarios del monolito piden los tres campos; solo las cuentas `confirmado` pueden iniciar sesión.
+
+- **Instalación desde cero:** `db/01_schema.sql` ya crea la estructura nueva (y registra la migración 001 en `schema_migraciones`).
+- **Base de datos existente:** ejecutar **una vez** `db/cambio_usuarios.sql` (transaccional e idempotente; migra los nombres sin perder datos y verifica el resultado antes de confirmar). Debe correr antes de desplegar esta versión del monolito y antes de levantar el microservicio de auth (`apps/services/login`), que comparte la tabla.
+- Las cuentas creadas desde el monolito (registro propio o alta por el administrador) nacen `confirmado`, porque el monolito no envía correos; las creadas por el microservicio de auth nacen `pendiente` hasta abrir el link que llega a Mailpit.
+- Los usuarios migrados pueden quedar sin apellido materno; el administrador lo completa desde **Usuarios → Editar**.
+
+Ver `INSTRUCCIONES.txt` (raíz del repositorio) para el orden completo de ejecución.
+
 ## Despliegue en CentOS Stream 10
 
 1. Instala Node.js y las herramientas de compilación necesarias para `bcrypt`:

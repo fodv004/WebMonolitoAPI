@@ -71,20 +71,33 @@ INSERT INTO conceptos (nombre) VALUES
 
 -- Administrador: reemplaza el password_hash por un hash bcrypt real antes de usar
 -- (ver README.md — node -e "require('bcrypt').hash('tu_password',12).then(console.log)")
-INSERT INTO usuarios (nombre, correo, password_hash, es_admin)
-VALUES ('Admin Principal', 'admin@libreria.com', 'CAMBIAR_POR_HASH_BCRYPT_REAL', TRUE);
+-- Las cuentas del seed ya están confirmadas (estado_cuenta = 'confirmado').
+INSERT INTO usuarios (nombre, apellido_paterno, correo, password_hash, es_admin, estado_cuenta)
+VALUES ('Admin', 'Principal', 'admin@libreria.com', 'CAMBIAR_POR_HASH_BCRYPT_REAL', TRUE, 'confirmado');
 
 DO $$
 DECLARE
+    -- Nombre(s) de pila y primer apellido por separado (1FN). El seed no
+    -- inventa apellido materno: queda NULL, igual que tras cambio_usuarios.sql.
     nombres TEXT[] := ARRAY[
-        'María Fernanda López', 'José Luis Hernández', 'Ana Sofía Martínez', 'Diego Alejandro Ramírez',
-        'Valentina Torres', 'Santiago Gómez', 'Camila Rodríguez', 'Mateo Sánchez',
-        'Regina Flores', 'Emiliano Cruz', 'Ximena Morales', 'Sebastián Ortiz',
-        'Daniela Reyes', 'Alejandro Jiménez', 'Fernanda Castillo', 'Leonardo Vázquez',
-        'Paulina Mendoza', 'Rodrigo Ruiz', 'Isabella Guzmán', 'Nicolás Aguilar',
-        'Renata Vargas', 'Adrián Castro', 'Mariana Ríos', 'Gael Delgado',
-        'Sofía Navarro', 'Ángel Domínguez', 'Victoria Chávez', 'Iker Salazar',
-        'Natalia Peña'
+        'María Fernanda', 'José Luis', 'Ana Sofía', 'Diego Alejandro',
+        'Valentina', 'Santiago', 'Camila', 'Mateo',
+        'Regina', 'Emiliano', 'Ximena', 'Sebastián',
+        'Daniela', 'Alejandro', 'Fernanda', 'Leonardo',
+        'Paulina', 'Rodrigo', 'Isabella', 'Nicolás',
+        'Renata', 'Adrián', 'Mariana', 'Gael',
+        'Sofía', 'Ángel', 'Victoria', 'Iker',
+        'Natalia'
+    ];
+    paternos TEXT[] := ARRAY[
+        'López', 'Hernández', 'Martínez', 'Ramírez',
+        'Torres', 'Gómez', 'Rodríguez', 'Sánchez',
+        'Flores', 'Cruz', 'Morales', 'Ortiz',
+        'Reyes', 'Jiménez', 'Castillo', 'Vázquez',
+        'Mendoza', 'Ruiz', 'Guzmán', 'Aguilar',
+        'Vargas', 'Castro', 'Ríos', 'Delgado',
+        'Navarro', 'Domínguez', 'Chávez', 'Salazar',
+        'Peña'
     ];
     correos TEXT[] := ARRAY[
         'maria.lopez', 'jose.hernandez', 'ana.martinez', 'diego.ramirez',
@@ -99,8 +112,8 @@ DECLARE
     i INTEGER;
 BEGIN
     FOR i IN 1..29 LOOP
-        INSERT INTO usuarios (nombre, correo, password_hash, es_admin)
-        VALUES (nombres[i], correos[i] || '@libreria.com', 'demo1234', FALSE);
+        INSERT INTO usuarios (nombre, apellido_paterno, correo, password_hash, es_admin, estado_cuenta)
+        VALUES (nombres[i], paternos[i], correos[i] || '@libreria.com', 'demo1234', FALSE, 'confirmado');
     END LOOP;
 END $$;
 
