@@ -1,0 +1,14 @@
+Se tiene que hacer de esta manera porque separar el microservicio de auth del monolito 
+evita que dos sistemas distintos escriban a la misma tabla de usuarios por caminos diferentes 
+si tanto el monolito como el nuevo servicio insertaran o modificaran usuarios directo contra 
+PostgreSQL, un cambio en uno podría romper al otro sin que nadie se diera cuenta, sobre todo 
+ahora que también entran el microservicio de libros y la app de Electron al mismo proyecto. 
+Al dejar que solo el microservicio de auth sea dueño de esa tabla, cualquier cambio futuro 
+pasa por un solo lugar, y los demás componentes solo lo consumen por su API. 
+Por eso también hubo que normalizar la tabla de usuarios, ya que  tenía el nombre completo en un solo 
+campo, lo cual mezclaba varios datos donde debería haber uno solo, y había que separarlo 
+en columnas atómicas antes de construir nada encima. Y el correo de confirmación se resolvió 
+con Mailpit, como servidor de correo propio de la instancia, porque Google Cloud bloquea por 
+default la salida al puerto 25 y sin dominio público no había forma de garantizar la entrega real, 
+pero el flujo de generar el token, mandarlo por correo y exigir el clic sigue siendo el mismo 
+sin importar eso.

@@ -4,7 +4,7 @@ Aplicación Node.js monolítica con MVC, Express, EJS y acceso directo a Postgre
 
 ## Alcance
 
-- Registro, inicio de sesión y administración de usuarios. Las contraseñas se almacenan con bcrypt.
+- Registro e inicio de sesión **delegados en el microservicio de auth** (`apps/services/login`, ver más abajo) y administración de usuarios. Las contraseñas se almacenan con bcrypt.
 - CRUD de `formatos`, `generos`, `autores`, `conceptos`, `usuarios` y `libros`.
 - Administración de las relaciones `libro_autor`, `libro_genero` y `libro_concepto` desde el formulario y detalle del libro.
 - Carga local de imágenes o registro de URL para `imagenes`; la opción principal respeta la restricción de una portada por libro.
@@ -27,7 +27,7 @@ La tabla `usuarios` guarda `nombre`, `apellido_paterno` y `apellido_materno` en 
 
 - **Instalación desde cero:** `db/01_schema.sql` ya crea la estructura nueva (y registra la migración 001 en `schema_migraciones`).
 - **Base de datos existente:** ejecutar **una vez** `db/cambio_usuarios.sql` (transaccional e idempotente; migra los nombres sin perder datos y verifica el resultado antes de confirmar). Debe correr antes de desplegar esta versión del monolito y antes de levantar el microservicio de auth (`apps/services/login`), que comparte la tabla.
-- Las cuentas creadas desde el monolito (registro propio o alta por el administrador) nacen `confirmado`, porque el monolito no envía correos; las creadas por el microservicio de auth nacen `pendiente` hasta abrir el link que llega a Mailpit.
+- El registro público del monolito (`/registro`) ya no inserta en PostgreSQL: hace `POST /register` al microservicio de auth y la cuenta nace `pendiente` hasta abrir el link que llega a Mailpit. Las altas hechas por el administrador en **Usuarios** (CRUD directo a PostgreSQL) nacen `confirmado`, porque no envían correo.
 - Los usuarios migrados pueden quedar sin apellido materno; el administrador lo completa desde **Usuarios → Editar**.
 
 Ver `INSTRUCCIONES.txt` (raíz del repositorio) para el orden completo de ejecución.
@@ -66,7 +66,12 @@ Ver `INSTRUCCIONES.txt` (raíz del repositorio) para el orden completo de ejecuc
 
 El dato de ejemplo del esquema usa un hash ilustrativo. Para que el primer administrador pueda iniciar sesión con una contraseña real, reemplázala por un hash bcrypt generado localmente (por ejemplo con `node -e "require('bcrypt').hash('UnaClaveSegura',12).then(console.log)"`) y ejecuta `UPDATE usuarios SET password_hash='HASH_GENERADO' WHERE correo='admin@libreria.com';`.
 
-El login detecta si `password_hash` tiene formato bcrypt (`$2a$`/`$2b$`/`$2y$`); si no lo tiene, compara la contraseña en texto plano. Esto permite que el usuario de prueba `demo@libreria.com` / `demo1234` (incluido en el esquema, sin hashear) entre directamente a la pantalla principal y de búsqueda sin pasos adicionales. Es solo para pruebas/demo: cualquier cuenta real debe guardarse siempre con `password_hash` generado por bcrypt.
+## Registro y login delegados en el microservicio de auth
+
+`POST /registro` y `POST /login` del monolito llaman con `fetch` (Node ≥ 18) a `POST /register?format=json` y `POST /login?format=json` del microservicio (`src/services/authClient.js`). El monolito muestra tal cual el mensaje de éxito o de error que responde el servicio (400 datos inválidos, 409 correo duplicado, 401/403 credenciales o cuenta sin confirmar) y, si el servicio no responde, un aviso 503. Tras un login correcto mantiene su propia sesión de Express.  
+
+- Variable: `AUTH_SERVICE_URL` (por defecto `http://localhost:5000`) y opcional `AUTH_SERVICE_TIMEOUT_MS`. El servicio de auth debe estar en marcha antes de usar `/registro` o `/login`.
+- El servicio solo acepta contraseñas con hash bcrypt. Las cuentas de demo del seed (`demo1234`, en texto plano) y el marcador del administrador dejan de poder entrar hasta ejecutar **una vez** `node scripts/hashear_passwords_legacy.js` (convierte a bcrypt las contraseñas en texto plano, conservando su valor) y asignar una contraseña real al administrador con el `UPDATE` que indica el script (ver el comando `node -e` de arriba).
 
 ## Estructura
 

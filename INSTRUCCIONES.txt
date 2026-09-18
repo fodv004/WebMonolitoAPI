@@ -25,6 +25,10 @@ propio rol de PostgreSQL con mínimo privilegio y NO comparten rutas:
 Electron solo consume  GET /books  (XML) del servicio de LIBROS; el
 servicio de AUTH no lo afecta.
 
+El MONOLITO depende del servicio de AUTH: su /registro y su /login ya no
+tocan PostgreSQL, hacen POST a http://localhost:5000/register y /login
+(?format=json). Arranca AUTH (y Mailpit) ANTES de usar el monolito.
+
 Convención de contraseñas de DESARROLLO usadas en estas instrucciones
 (cámbialas en cualquier despliegue real y actualiza los .env):
   library_user / library666      (dueño de la BD; monolito y servicio de libros)
@@ -125,14 +129,18 @@ paterno 'López') y el apellido materno faltante se corrigen desde el
 monolito: Usuarios -> Editar. Ningún dato se pierde: la migración verifica
 que nombre + apellidos reconstruye exactamente el nombre original.
 
-Contraseñas de los usuarios sembrados:
-  - El admin del seed trae 'CAMBIAR_POR_HASH_BCRYPT_REAL'. Genera un hash real:
-      node -e "require('bcrypt').hash('UnaClaveSegura',12).then(console.log)"
-    y  UPDATE usuarios SET password_hash='<hash>' WHERE correo='admin@libreria.com';
-  - Los 29 usuarios de demo tienen 'demo1234' en TEXTO PLANO (el monolito lo
-    tolera). El microservicio de AUTH NO acepta contraseñas en texto plano:
-    con esas cuentas devuelve 401. Para probar AUTH usa cuentas registradas
-    con POST /register (o cuentas con hash bcrypt).
+Contraseñas de los usuarios sembrados (IMPORTANTE):
+  El login del monolito ahora lo hace el servicio de AUTH, que solo acepta
+  hashes bcrypt. Las cuentas del seed no entran hasta que hagas esto UNA VEZ,
+  con la BD y sus variables DB_* en el .env del monolito:
+    a) Los 29 usuarios de demo tienen 'demo1234' en TEXTO PLANO. Conviértelos
+       a bcrypt (misma contraseña, solo cambia cómo se guarda):
+         cd apps\WebMonolito
+         node scripts\hashear_passwords_legacy.js
+       (idempotente; omite el marcador del admin a propósito)
+    b) El admin del seed trae 'CAMBIAR_POR_HASH_BCRYPT_REAL'. Ponle una clave real:
+         node -e "require('bcrypt').hash('UnaClaveSegura',12).then(console.log)"
+         UPDATE usuarios SET password_hash='<hash>' WHERE correo='admin@libreria.com';
 
 
 =====================================================================
@@ -214,12 +222,18 @@ Swagger (documentación XML/JSON):  http://localhost:5000/apidocs/
   cd apps\WebMonolito
   npm install
   copy .env.example .env      (DB_NAME=library, DB_USER=library_user, DB_PASSWORD=library666,
-                               cambia SESSION_SECRET)
-  npm start
+                               cambia SESSION_SECRET,
+                               AUTH_SERVICE_URL=http://localhost:5000)
+  npm start                   (requiere Node.js 18 o superior: usa fetch nativo)
   -> http://localhost:3000   (pantalla de login)
 
-Cuentas: admin@libreria.com (con el hash que hayas puesto) o cualquier
-usuario de demo, p. ej. maria.lopez@libreria.com / demo1234.
+El servicio de AUTH (Parte 3) y Mailpit (Parte 2) deben estar en marcha para
+registrarse e iniciar sesión. Si el monolito y AUTH corren en máquinas
+distintas, pon en AUTH_SERVICE_URL la URL alcanzable de AUTH.
+
+Cuentas: admin@libreria.com (con la clave que hayas puesto) o cualquier
+usuario de demo, p. ej. maria.lopez@libreria.com / demo1234 (después de
+ejecutar scripts\hashear_passwords_legacy.js, ver Parte 1).
 
 
 =====================================================================
@@ -323,20 +337,33 @@ Esperado: responde igual que antes de la migración 1FN (no usa las columnas
 que cambiaron). Comprobación de que AUTH y LIBROS no chocan:
    http://localhost:5000/books  -> 404      http://localhost:5001/login -> 404
 
-7.4  Verificación del MONOLITO con la tabla usuarios normalizada
+7.4  Verificación del MONOLITO (registro y login delegados en AUTH)
 ---------------------------------------------------------------------
- a) http://localhost:3000/registro pide Nombre, Apellido paterno y Apellido
-    materno (ya no un "nombre completo"). Regístrate y entra: el nombre
-    completo aparece arriba a la derecha.
- b) Como administrador: Usuarios -> la tabla muestra Nombre / Apellido
+Con AUTH y Mailpit en marcha:
+ a) http://localhost:3000/registro pide Nombre, Apellido paterno, Apellido
+    materno, Correo y Contraseña. Regístrate: el monolito redirige al login
+    con el aviso verde "Cuenta creada. Revisa tu correo para confirmar tu
+    cuenta...". El correo aparece en Mailpit (http://localhost:8025) y en
+    la BD la cuenta queda 'pendiente' (la creó el servicio de AUTH).
+ b) Errores que el monolito muestra tal cual los responde AUTH:
+      - mismo correo otra vez            -> "Ya existe una cuenta registrada con ese email."
+      - email mal escrito / password < 8 -> el detalle de cada campo inválido
+        (para verlo desde el navegador quita el atributo required/minlength
+         con las herramientas de desarrollo, o usa curl.exe / PowerShell)
+ c) Login antes de confirmar: "La cuenta aun no esta confirmada..." (403).
+    Abre el enlace del correo -> página verde "¡Cuenta activada!" ->
+    ahora el login entra y arriba a la derecha aparece el nombre completo.
+    Contraseña incorrecta -> "Email o contraseña incorrectos."
+ d) Servicio caído: detén AUTH y prueba /registro y /login -> aviso "El
+    servicio de autenticación no está disponible en este momento..." y NO
+    se crea ningún usuario (prueba de que el monolito ya no inserta directo).
+ e) Como administrador: Usuarios -> la tabla muestra Nombre / Apellido
     paterno / Apellido materno / Correo / Rol / Activo / Cuenta. Edita un
-    usuario migrado y agrégale su apellido materno.
- c) Cuenta creada por el microservicio de AUTH:
-      - pendiente  -> el monolito rechaza el login con "Tu cuenta aún no
-        está confirmada...";
-      - confirmada -> entra al monolito con la MISMA contraseña (ambos usan
-        bcrypt). Y a la inversa: una cuenta registrada en el monolito inicia
-        sesión en POST /login del servicio de AUTH.
+    usuario migrado y agrégale su apellido materno. (El CRUD del administrador
+    sigue escribiendo directo en PostgreSQL; sus altas nacen 'confirmado'.)
+ f) Una cuenta registrada en el monolito también inicia sesión en
+    POST /login del servicio de AUTH (ambos comparten usuarios y bcrypt).
+
 
 7.5  Verificación de la app ELECTRON
 ---------------------------------------------------------------------
@@ -364,6 +391,10 @@ que cambiaron). Comprobación de que AUTH y LIBROS no chocan:
  - 503 CORREO_NO_ENVIADO al registrar      -> Mailpit no está en localhost:1025.
                                               No queda ningún usuario a medias; reintenta.
  - 503 BASE_DE_DATOS_NO_DISPONIBLE         -> PostgreSQL apagado o DB_* incorrectos en .env.
+ - Monolito: "El servicio de autenticación no está disponible" -> AUTH no está en marcha o
+   AUTH_SERVICE_URL del .env del monolito no apunta a él (revisa también el puerto 5000).
+ - Monolito: las cuentas del seed dan "Email o contraseña incorrectos" -> falta ejecutar
+   scripts\hashear_passwords_legacy.js y poner una clave real al admin (Parte 1).
  - "permission denied for table usuarios"  -> falta ejecutar sql/auth_roles.sql (o se usó otro rol).
  - relation "tokens_confirmacion" does not exist -> falta sql/auth_module.sql.
  - column "estado_cuenta" does not exist   -> falta WebMonolito/db/cambio_usuarios.sql.
