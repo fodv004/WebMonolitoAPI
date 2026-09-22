@@ -5,11 +5,31 @@ error es {"field": ..., "message": ...}.
 """
 import re
 
+import dns.exception
+import dns.resolver
 from email_validator import EmailNotValidError, validate_email
 
 from security import BCRYPT_MAX_BYTES
 
 PASSWORD_MIN = 8
+
+# Cache en memoria del proceso: evita repetir la misma consulta MX en cada intento de registro.
+_MX_CACHE = {}
+
+
+def _dominio_recibe_correo(dominio):
+    """Consulta MX (dnspython) para saber si el dominio puede recibir correo.
+    Ante un problema de red/timeout no se bloquea el registro (fail-open)."""
+    if dominio in _MX_CACHE:
+        return _MX_CACHE[dominio]
+    try:
+        resultado = bool(dns.resolver.resolve(dominio, "MX", lifetime=5))
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
+        resultado = False
+    except dns.exception.Timeout:
+        resultado = True
+    _MX_CACHE[dominio] = resultado
+    return resultado
 
 # Nombres: empiezan con letra; despues letras (con acentos), espacios, ', . y -.
 # Rechaza digitos, '<', '>' y demas simbolos.
@@ -35,13 +55,15 @@ def validar_email(valor):
     if not valor or not valor.strip():
         return None, "El email es obligatorio."
     try:
-        # Solo formato y dominio bien formado: no se hacen consultas DNS.
+        # Formato y dominio bien formado (sin la consulta DNS propia de la libreria: se hace abajo con dnspython).
         info = validate_email(valor.strip(), check_deliverability=False)
     except EmailNotValidError as e:
         return None, f"El email no es valido: {e}"
     correo = info.normalized.lower()
     if len(correo) > 150:
         return None, "El email no puede exceder 150 caracteres."
+    if not _dominio_recibe_correo(info.domain):
+        return None, "El dominio del email no recibe correo (sin registro MX)."
     return correo, None
 
 

@@ -7,6 +7,7 @@ datos de libros/conceptos en XML o JSON segun el query parameter
 """
 import xml.etree.ElementTree as ET
 
+import psycopg2
 from flask import Blueprint, Response, jsonify, request
 
 from db.connection import get_connection
@@ -22,6 +23,11 @@ class FormatoInvalido(Exception):
         self.valor = valor
 
 
+class ValidacionError(Exception):
+    def __init__(self, mensaje):
+        self.mensaje = mensaje
+
+
 @rest_bp.errorhandler(FormatoInvalido)
 def _formato_invalido(err):
     return jsonify({
@@ -29,6 +35,16 @@ def _formato_invalido(err):
         "mensaje": f"El valor de 'format' ({err.valor!r}) no es valido.",
         "valoresValidos": sorted(FORMATOS_VALIDOS),
     }), 400
+
+
+@rest_bp.errorhandler(ValidacionError)
+def _validacion_error(err):
+    return jsonify({"error": "VALIDACION", "mensaje": err.mensaje}), 400
+
+
+@rest_bp.errorhandler(psycopg2.Error)
+def _db_error(err):
+    return jsonify({"error": "ERROR_BASE_DE_DATOS", "mensaje": str(err).strip()}), 400
 
 
 def _resolver_formato():
@@ -157,6 +173,156 @@ def _fetch_todos_conceptos_cloud():
         conn.close()
 
 
+def _fetch_libro_card(isbn):
+    """Igual que una fila de _fetch_todos_libros pero para un solo isbn (usada tras insertar/editar)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre,
+                       string_agg(DISTINCT a.nombre, ', ') AS autor,
+                       string_agg(DISTINCT g.nombre, ', ') AS genero,
+                       (
+                           SELECT i.url FROM imagenes i
+                           WHERE i.isbn = l.isbn
+                           ORDER BY i.es_principal DESC, i.orden ASC NULLS LAST
+                           LIMIT 1
+                       ) AS imagen_url
+                FROM libros l
+                JOIN formatos f ON f.id_formato = l.id_formato
+                LEFT JOIN libro_autor la ON la.isbn = l.isbn
+                LEFT JOIN autores a ON a.id_autor = la.id_autor
+                LEFT JOIN libro_genero lg ON lg.isbn = l.isbn
+                LEFT JOIN generos g ON g.id_genero = lg.id_genero
+                WHERE l.isbn = %s
+                GROUP BY l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre
+                """,
+                (isbn,),
+            )
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def _card_dict(row):
+    isbn, titulo, anio, precio, stock, formato_nombre, autor, genero, imagen_url = row
+    return {
+        "isbn": isbn,
+        "titulo": titulo,
+        "anio": anio,
+        "precio": float(precio),
+        "stock": stock,
+        "formato": formato_nombre,
+        "autor": autor,
+        "genero": genero,
+        "portada": imagen_url,
+        "image_url": imagen_url,
+        "href": f"{request.host_url.rstrip('/')}/books/{isbn}",
+    }
+
+
+# ============================================================
+# Validacion y escritura (POST/PUT/DELETE) - usadas por las
+# operaciones de CRUD de mas abajo. Consultas parametrizadas.
+# ============================================================
+
+def _read_payload():
+    if request.is_json:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            raise ValidacionError("El cuerpo JSON no es un objeto valido.")
+        return data
+    if request.form:
+        return request.form.to_dict()
+    raise ValidacionError("Envia el cuerpo como JSON (application/json) o como formulario.")
+
+
+def _texto(data, campo, requerido=False, maximo=None):
+    valor = data.get(campo)
+    if valor is None or (isinstance(valor, str) and not valor.strip()):
+        if requerido:
+            raise ValidacionError(f"El campo '{campo}' es obligatorio.")
+        return None
+    if not isinstance(valor, str):
+        raise ValidacionError(f"El campo '{campo}' debe ser texto.")
+    valor = valor.strip()
+    if maximo and len(valor) > maximo:
+        raise ValidacionError(f"El campo '{campo}' no puede exceder {maximo} caracteres.")
+    return valor
+
+
+def _numero(data, campo, tipo, requerido=False, minimo=None):
+    valor = data.get(campo)
+    if valor is None or valor == "":
+        if requerido:
+            raise ValidacionError(f"El campo '{campo}' es obligatorio.")
+        return None
+    try:
+        valor = tipo(valor)
+    except (TypeError, ValueError):
+        raise ValidacionError(f"El campo '{campo}' debe ser numerico.")
+    if minimo is not None and valor < minimo:
+        raise ValidacionError(f"El campo '{campo}' debe ser mayor o igual a {minimo}.")
+    return valor
+
+
+def _get_or_create_formato(nombre, cur):
+    cur.execute(
+        """
+        INSERT INTO formatos (nombre) VALUES (%s)
+        ON CONFLICT (nombre) DO UPDATE SET nombre = EXCLUDED.nombre
+        RETURNING id_formato
+        """,
+        (nombre,),
+    )
+    return cur.fetchone()[0]
+
+
+def _get_or_create_genero(nombre, cur):
+    cur.execute(
+        """
+        INSERT INTO generos (nombre) VALUES (%s)
+        ON CONFLICT (nombre) DO UPDATE SET nombre = EXCLUDED.nombre
+        RETURNING id_genero
+        """,
+        (nombre,),
+    )
+    return cur.fetchone()[0]
+
+
+def _get_or_create_autor(nombre, cur):
+    # 'autores.nombre' no es UNIQUE en el esquema original: se reutiliza por
+    # coincidencia exacta (sin importar mayusculas) y si no existe se crea.
+    cur.execute("SELECT id_autor FROM autores WHERE lower(nombre) = lower(%s) LIMIT 1", (nombre,))
+    fila = cur.fetchone()
+    if fila:
+        return fila[0]
+    cur.execute("INSERT INTO autores (nombre) VALUES (%s) RETURNING id_autor", (nombre,))
+    return cur.fetchone()[0]
+
+
+def _set_autor(isbn, nombre, cur):
+    id_autor = _get_or_create_autor(nombre, cur)
+    cur.execute("DELETE FROM libro_autor WHERE isbn = %s", (isbn,))
+    cur.execute("INSERT INTO libro_autor (isbn, id_autor) VALUES (%s, %s)", (isbn, id_autor))
+
+
+def _set_genero(isbn, nombre, cur):
+    id_genero = _get_or_create_genero(nombre, cur)
+    cur.execute("DELETE FROM libro_genero WHERE isbn = %s", (isbn,))
+    cur.execute("INSERT INTO libro_genero (isbn, id_genero) VALUES (%s, %s)", (isbn, id_genero))
+
+
+def _set_portada(isbn, url, cur):
+    cur.execute("UPDATE imagenes SET url = %s WHERE isbn = %s AND es_principal", (url, isbn))
+    if cur.rowcount == 0:
+        cur.execute(
+            "INSERT INTO imagenes (isbn, url, es_principal, orden) VALUES (%s, %s, TRUE, 0)",
+            (isbn, url),
+        )
+
+
 def _fetch_libros_minimos_con_imagenes():
     conn = get_connection()
     try:
@@ -191,23 +357,7 @@ def listar_libros():
     libros = _fetch_todos_libros()
 
     if formato == "json":
-        cards = [
-            {
-                "isbn": isbn,
-                "titulo": titulo,
-                "anio": anio,
-                "precio": float(precio),
-                "stock": stock,
-                "formato": formato_nombre,
-                "autor": autor,
-                "genero": genero,
-                "portada": imagen_url,
-                "image_url": imagen_url,
-                "href": f"{request.host_url.rstrip('/')}/books/{isbn}",
-            }
-            for isbn, titulo, anio, precio, stock, formato_nombre, autor, genero, imagen_url in libros
-        ]
-        return jsonify(cards), 200
+        return jsonify([_card_dict(fila) for fila in libros]), 200
 
     root = ET.Element("books")
     for isbn, titulo, anio, precio, stock, formato_nombre, autor, genero, imagen_url in libros:
@@ -350,3 +500,189 @@ def obtener_libros_con_imagenes():
             }).text = imagen["url"]
 
     return _xml_response(root)
+
+
+# ============================================================
+# 5. Salud del servicio (usado por el semaforo de la app cliente).
+# ============================================================
+@rest_bp.route("/health", methods=["GET"])
+def salud():
+    formato = _resolver_formato()
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+    except psycopg2.Error:
+        return jsonify({
+            "status": "error",
+            "code": "BASE_DE_DATOS_NO_DISPONIBLE",
+            "mensaje": "PostgreSQL no responde.",
+        }), 503
+    finally:
+        conn.close()
+
+    if formato == "json":
+        return jsonify({"status": "ok", "service": "books"}), 200
+    root = ET.Element("health")
+    ET.SubElement(root, "status").text = "ok"
+    ET.SubElement(root, "service").text = "books"
+    return _xml_response(root)
+
+
+# ============================================================
+# 6. Formatos existentes (para el selector de la app cliente).
+# ============================================================
+@rest_bp.route("/formats", methods=["GET"])
+def listar_formatos():
+    formato = _resolver_formato()
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id_formato, nombre FROM formatos ORDER BY nombre")
+            filas = cur.fetchall()
+    finally:
+        conn.close()
+
+    if formato == "json":
+        return jsonify([{"id_formato": id_formato, "nombre": nombre} for id_formato, nombre in filas]), 200
+
+    root = ET.Element("formats")
+    for id_formato, nombre in filas:
+        ET.SubElement(root, "format", {"id": str(id_formato)}).text = nombre
+    return _xml_response(root)
+
+
+# ============================================================
+# 7. Crear libro. Body: isbn, titulo, anio, precio, stock, formato
+#    (nombre; se crea si no existe) y, opcionales, autor, genero,
+#    portada (url de la imagen principal).
+# ============================================================
+@rest_bp.route("/books", methods=["POST"])
+def crear_libro():
+    _resolver_formato()
+    data = _read_payload()
+
+    isbn = _texto(data, "isbn", requerido=True, maximo=13)
+    titulo = _texto(data, "titulo", requerido=True, maximo=255)
+    anio = _numero(data, "anio", int, requerido=True, minimo=1)
+    precio = _numero(data, "precio", float, requerido=True, minimo=0)
+    stock = _numero(data, "stock", int, requerido=True, minimo=0)
+    nombre_formato = _texto(data, "formato", requerido=True, maximo=50)
+    autor = _texto(data, "autor", maximo=150)
+    genero = _texto(data, "genero", maximo=50)
+    portada = _texto(data, "portada", maximo=500)
+
+    conn = get_connection()
+    try:
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    id_formato = _get_or_create_formato(nombre_formato, cur)
+                    cur.execute(
+                        """
+                        INSERT INTO libros (isbn, titulo, anio_publicacion, precio, stock, id_formato)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        (isbn, titulo, anio, precio, stock, id_formato),
+                    )
+                    if autor:
+                        _set_autor(isbn, autor, cur)
+                    if genero:
+                        _set_genero(isbn, genero, cur)
+                    if portada:
+                        _set_portada(isbn, portada, cur)
+        except psycopg2.errors.UniqueViolation:
+            return jsonify({
+                "error": "ISBN_DUPLICADO",
+                "mensaje": f"Ya existe un libro con ISBN {isbn}.",
+            }), 409
+    finally:
+        conn.close()
+
+    return jsonify(_card_dict(_fetch_libro_card(isbn))), 201
+
+
+# ============================================================
+# 8. Editar libro. Body: cualquier subconjunto de titulo, anio,
+#    precio, stock, formato, autor, genero, portada.
+# ============================================================
+@rest_bp.route("/books/<isbn>", methods=["PUT"])
+def actualizar_libro(isbn):
+    _resolver_formato()
+    if _fetch_libro(isbn) is None:
+        return jsonify({
+            "error": "LIBRO_NO_ENCONTRADO",
+            "mensaje": f"No existe un libro con ISBN {isbn}.",
+        }), 404
+
+    data = _read_payload()
+    titulo = _texto(data, "titulo", maximo=255)
+    anio = _numero(data, "anio", int, minimo=1)
+    precio = _numero(data, "precio", float, minimo=0)
+    stock = _numero(data, "stock", int, minimo=0)
+    nombre_formato = _texto(data, "formato", maximo=50)
+    autor = _texto(data, "autor", maximo=150)
+    genero = _texto(data, "genero", maximo=50)
+    portada = _texto(data, "portada", maximo=500)
+
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                campos, valores = [], []
+                if titulo is not None:
+                    campos.append("titulo = %s")
+                    valores.append(titulo)
+                if anio is not None:
+                    campos.append("anio_publicacion = %s")
+                    valores.append(anio)
+                if precio is not None:
+                    campos.append("precio = %s")
+                    valores.append(precio)
+                if stock is not None:
+                    campos.append("stock = %s")
+                    valores.append(stock)
+                if nombre_formato is not None:
+                    campos.append("id_formato = %s")
+                    valores.append(_get_or_create_formato(nombre_formato, cur))
+                if campos:
+                    valores.append(isbn)
+                    cur.execute(f"UPDATE libros SET {', '.join(campos)} WHERE isbn = %s", valores)
+                if autor:
+                    _set_autor(isbn, autor, cur)
+                if genero:
+                    _set_genero(isbn, genero, cur)
+                if portada:
+                    _set_portada(isbn, portada, cur)
+    finally:
+        conn.close()
+
+    return jsonify(_card_dict(_fetch_libro_card(isbn))), 200
+
+
+# ============================================================
+# 9. Eliminar libro.
+# ============================================================
+@rest_bp.route("/books/<isbn>", methods=["DELETE"])
+def eliminar_libro(isbn):
+    if _fetch_libro(isbn) is None:
+        return jsonify({
+            "error": "LIBRO_NO_ENCONTRADO",
+            "mensaje": f"No existe un libro con ISBN {isbn}.",
+        }), 404
+
+    conn = get_connection()
+    try:
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM libros WHERE isbn = %s", (isbn,))
+        except psycopg2.errors.ForeignKeyViolation:
+            return jsonify({
+                "error": "LIBRO_EN_USO",
+                "mensaje": "No se puede eliminar: el libro tiene clasificaciones Cloud asociadas.",
+            }), 409
+    finally:
+        conn.close()
+
+    return jsonify({"status": "ok", "mensaje": f"Libro {isbn} eliminado.", "isbn": isbn}), 200

@@ -1,0 +1,178 @@
+=====================================================================
+ PYTHON_APP - APP DE ESCRITORIO (Tkinter) - COMO EJECUTAR TODO
+=====================================================================
+
+Qué es esto
+---------------------------------------------------------------------
+Una app de escritorio en Python puro (Tkinter, sin dependencias
+externas) que:
+  - Permite iniciar sesión y registrar cuentas contra el microservicio
+    de AUTH (apps/services/login, puerto 5000).
+  - Muestra el catálogo de libros del microservicio de LIBROS
+    (apps/services/library_soap_service, puerto 5001) con un semáforo
+    (verde/rojo) del estado de ambos servicios.
+  - Permite insertar, editar, eliminar y buscar libros (CRUD real,
+    contra endpoints nuevos que se agregaron a ese servicio).
+  - Guarda la configuración (URLs de los dos servicios) en un archivo
+    local_storage.json junto al programa: es el equivalente de
+    escritorio al localStorage del navegador, sobrevive entre
+    ejecuciones.
+
+No hace falta instalar nada para la app de escritorio en sí: solo usa
+la librería estándar de Python (tkinter, urllib, json). Lo único que
+necesita internet/red es para hablar con los microservicios.
+
+
+Componentes y puertos
+---------------------------------------------------------------------
+  Componente                         Carpeta                              Puerto
+  ---------------------------------  -----------------------------------  ------
+  PostgreSQL (base "library")        -                                    5432
+  Microservicio de AUTH (Flask)      apps/services/login                  5000
+  Microservicio de LIBROS (Flask)    apps/services/library_soap_service   5001
+  Mailpit SMTP (modo de pruebas)     -                                    1025
+  Mailpit interfaz web               -                                    8025
+  App de escritorio Python/Tk        apps/Python_app                      (cliente)
+
+
+=====================================================================
+ PARTE 0 - REQUISITO PREVIO: BASE DE DATOS
+=====================================================================
+Si ya tienes la base "library" funcionando (por ejemplo porque ya
+corriste el monolito o el microservicio de auth antes), sáltate esta
+parte. Si no, sigue la PARTE 1 de INSTRUCCIONES.txt en la raíz del
+repositorio (EG4/INSTRUCCIONES.txt) para crear la base, el esquema y
+los datos de ejemplo antes de continuar.
+
+
+=====================================================================
+ PARTE 1 - MICROSERVICIO DE AUTH (login, puerto 5000)
+=====================================================================
+  cd apps\services\login
+  python -m venv .venv
+  .venv\Scripts\activate
+  pip install -r requirements.txt
+  copy .env.example .env        (si aún no existe; en este repo ya hay un .env listo)
+
+Edita .env y revisa DB_HOST/DB_USER/DB_PASSWORD si tu Postgres usa
+otros valores. Para el correo tienes dos modos, elegidos con
+MAIL_MODE:
+
+  MAIL_MODE=mailpit  (por defecto, recomendado para probar)
+    SMTP_HOST=localhost
+    SMTP_PORT=1025
+    -> Necesitas Mailpit corriendo en tu máquina y escuchando en
+       localhost:1025 (interfaz web en http://localhost:8025, ahí
+       verás los correos de confirmación sin enviarlos de verdad).
+
+  MAIL_MODE=gmail  (correo real, vía Gmail)
+    SMTP_HOST=smtp.gmail.com
+    SMTP_PORT=587
+    SMTP_USER=tu_correo@gmail.com
+    SMTP_PASSWORD=xxxx xxxx xxxx xxxx   (contraseña de APLICACIÓN, no la normal)
+    SMTP_FROM=Librería <tu_correo@gmail.com>
+
+    Para generar la contraseña de aplicación:
+      1. Activa la verificación en 2 pasos en tu cuenta de Gmail.
+      2. Ve a https://myaccount.google.com/apppasswords
+      3. Crea una contraseña de aplicación (16 caracteres) y pégala
+         en SMTP_PASSWORD tal cual (puede incluir espacios).
+    NUNCA uses tu contraseña normal de Gmail aquí.
+
+Arranca el servicio:
+  python app.py
+  -> http://localhost:5000/apidocs/  (Swagger)
+  -> http://localhost:5000/health?format=json  debe responder 200
+
+El registro valida el dominio del correo con una consulta MX real
+(dnspython): acepta gmail.com, hotmail.com, outlook.com, udem.edu,
+dominios .com.mx, etc., y rechaza dominios inventados que no reciben
+correo (p. ej. "abc@noexiste123456.com").
+
+
+=====================================================================
+ PARTE 2 - MICROSERVICIO DE LIBROS (puerto 5001)
+=====================================================================
+  cd apps\services\library_soap_service
+  python -m venv .venv          (si no existe ya)
+  .venv\Scripts\activate
+  pip install -r requirements.txt
+  copy .env.example .env        (ajusta DB_HOST/DB_USER/DB_PASSWORD si hace falta)
+  python app.py
+  -> http://localhost:5001/books?format=json     debe listar libros
+  -> http://localhost:5001/health?format=json     debe responder 200
+
+Este servicio ahora también expone (nuevo, para la app de escritorio):
+  GET    /health           estado del servicio (para el semáforo)
+  GET    /formats           lista de formatos existentes
+  POST   /books              crear libro
+  PUT    /books/<isbn>       editar libro
+  DELETE /books/<isbn>       eliminar libro
+(las rutas GET /books, /books/<isbn>, /books/gallery, /cloud-concepts
+y /soap ya existían y no cambiaron).
+
+
+=====================================================================
+ PARTE 3 - APP DE ESCRITORIO (apps/Python_app)
+=====================================================================
+  cd apps\Python_app
+  python main.py
+
+No requiere pip install (solo librería estándar). Se abre la pantalla
+de inicio de sesión.
+
+Primer uso / cambiar de máquina:
+  Si los microservicios NO corren en localhost:5000 y localhost:5001,
+  abre "Configuración" (desde la pantalla de login) y cambia las URLs.
+  Se guardan en apps/Python_app/local_storage.json y se reutilizan la
+  próxima vez que abras la app.
+
+
+=====================================================================
+ PARTE 4 - CÓMO VERIFICAR QUE TODO FUNCIONA
+=====================================================================
+1. Con AUTH y LIBROS corriendo, abre la app (PARTE 3).
+2. En Configuración, pulsa "Probar conexión": debe decir
+   "Login: OK · Libros: OK".
+3. Pulsa "Crear cuenta" y registra un usuario con un correo real
+   (gmail/hotmail/outlook/udem.edu/etc). Si usas un dominio inventado
+   debe rechazarlo (validación MX).
+4. Revisa el correo de confirmación:
+     - MAIL_MODE=mailpit -> ábrelo en http://localhost:8025
+     - MAIL_MODE=gmail   -> revisa la bandeja de entrada real
+   Haz clic en el enlace "Confirmar mi cuenta".
+5. Vuelve a la app e inicia sesión con ese usuario -> debe entrar al
+   catálogo.
+6. En el catálogo:
+     - Verifica que las dos luces del semáforo (Login / Libros) estén
+       en verde. Apaga uno de los dos servicios (Ctrl+C en su
+       terminal) y confirma que su luz se pone roja en unos segundos;
+       vuelve a arrancarlo y confirma que regresa a verde.
+     - Usa "+ Insertar libro" para dar de alta un libro nuevo (ISBN,
+       título, año, precio, stock, formato son obligatorios).
+     - Usa "Buscar" para filtrar por ISBN/título/autor/género.
+     - Usa "Editar" en una tarjeta para modificar sus datos.
+     - Usa "Eliminar" en una tarjeta para borrarla (pide confirmación).
+     - "Actualizar catálogo" vuelve a traer la lista completa del
+       servicio de libros.
+7. "Cerrar sesión" regresa a la pantalla de login (cierra la sesión
+   en el servicio de AUTH).
+
+
+=====================================================================
+ SOLUCIÓN DE PROBLEMAS
+=====================================================================
+- Luz roja permanente: el servicio correspondiente no está corriendo,
+  o la URL configurada no es la correcta (revisa Configuración).
+- "No se pudo conectar con http://...": el microservicio está apagado
+  o el puerto/host configurado no coincide con el real.
+- Registro rechazado por "sin registro MX": el dominio del correo no
+  puede recibir correo (dominio inventado o mal escrito); usa uno real.
+- "No se pudo enviar el correo de confirmación": revisa MAIL_MODE y
+  las credenciales SMTP en apps/services/login/.env; el detalle queda
+  en el log de la terminal donde corre ese servicio. El usuario no
+  queda a medias: el registro se revierte y se puede reintentar.
+- Eliminar un libro devuelve "LIBRO_EN_USO": ese libro tiene
+  clasificaciones de Cloud Computing asociadas (módulo SOAP) y no se
+  puede borrar mientras existan; es un candado de integridad de la
+  base de datos, no un error de la app.

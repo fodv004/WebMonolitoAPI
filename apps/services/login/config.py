@@ -40,9 +40,14 @@ class Config:
     DB_USER = os.getenv("DB_USER", "auth_user")
     DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
+    # MAIL_MODE=mailpit (por defecto) -> SMTP local sin TLS ni login.
+    # MAIL_MODE=gmail -> smtp.gmail.com:587 con STARTTLS y login (contraseña de aplicación).
+    MAIL_MODE = os.getenv("MAIL_MODE", "mailpit").strip().lower()
     SMTP_HOST = os.getenv("SMTP_HOST", "localhost")
     SMTP_PORT = int(os.getenv("SMTP_PORT", "1025"))
-    MAIL_FROM = os.getenv("MAIL_FROM", "Libreria <no-reply@libreria.local>")
+    SMTP_USER = os.getenv("SMTP_USER", "")
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+    MAIL_FROM = os.getenv("SMTP_FROM", "").strip() or "Libreria <no-reply@libreria.local>"
 
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000").rstrip("/")
     CONFIRM_TOKEN_HOURS = int(os.getenv("CONFIRM_TOKEN_HOURS", "24"))
