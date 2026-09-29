@@ -4,12 +4,17 @@ Capa HTTP REST adicional (docs/04_prompt_soap.md), separada por
 completo del servidor SOAP (/soap en app.py). Expone los mismos
 datos de libros/conceptos en XML o JSON segun el query parameter
 "format". No modifica el WSDL ni las operaciones SOAP existentes.
+
+Las rutas GET son publicas. POST /books, PUT /books/<isbn>,
+PATCH /books/<isbn> y DELETE /books/<isbn> exigen un JWT valido del
+microservicio de login (ver api/auth_jwt.py).
 """
 import xml.etree.ElementTree as ET
 
 import psycopg2
 from flask import Blueprint, Response, jsonify, request
 
+from api.auth_jwt import jwt_requerido
 from db.connection import get_connection
 
 rest_bp = Blueprint("rest_api", __name__)
@@ -558,6 +563,7 @@ def listar_formatos():
 #    portada (url de la imagen principal).
 # ============================================================
 @rest_bp.route("/books", methods=["POST"])
+@jwt_requerido
 def crear_libro():
     _resolver_formato()
     data = _read_payload()
@@ -607,7 +613,22 @@ def crear_libro():
 #    precio, stock, formato, autor, genero, portada.
 # ============================================================
 @rest_bp.route("/books/<isbn>", methods=["PUT"])
+@jwt_requerido
 def actualizar_libro(isbn):
+    return _actualizar_campos_enviados(isbn)
+
+
+# ============================================================
+# 8b. Actualizacion parcial. Solo se modifican los campos enviados
+#     en el body; mismas validaciones, 404 y respuesta que PUT.
+# ============================================================
+@rest_bp.route("/books/<isbn>", methods=["PATCH"])
+@jwt_requerido
+def actualizar_libro_parcial(isbn):
+    return _actualizar_campos_enviados(isbn)
+
+
+def _actualizar_campos_enviados(isbn):
     _resolver_formato()
     if _fetch_libro(isbn) is None:
         return jsonify({
@@ -664,6 +685,7 @@ def actualizar_libro(isbn):
 # 9. Eliminar libro.
 # ============================================================
 @rest_bp.route("/books/<isbn>", methods=["DELETE"])
+@jwt_requerido
 def eliminar_libro(isbn):
     if _fetch_libro(isbn) is None:
         return jsonify({

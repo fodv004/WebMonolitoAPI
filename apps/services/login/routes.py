@@ -3,7 +3,7 @@ routes.py
 Endpoints del microservicio de autenticacion:
 
   POST /register   registrar usuario (envia correo de confirmacion por Mailpit)
-  POST /login      autenticar y abrir sesion Flask
+  POST /login      autenticar, abrir sesion Flask y emitir un JWT (data.token)
   POST /logout     cerrar sesion
   GET  /session    consultar la sesion actual
   GET  /health     estado del servicio y de PostgreSQL
@@ -22,7 +22,8 @@ from config import Config
 from db import get_conn
 from mailer import MailError, send_confirmation_email
 from responses import ApiError, resolve_format, success
-from security import burn_password_check, hash_password, new_token, token_digest, verify_password
+from security import (burn_password_check, create_access_token, hash_password, new_token, token_digest,
+                      verify_password)
 from validators import validar_credenciales, validar_registro
 
 log = logging.getLogger(__name__)
@@ -302,7 +303,10 @@ def login():
     Verifica email y contraseña contra PostgreSQL (hash bcrypt). Si son
     correctos y la cuenta está `confirmado`, crea la sesión de Flask
     (cookie firmada `auth_session`) que identifica al usuario en las
-    peticiones siguientes (`/session`, `/logout`).
+    peticiones siguientes (`/session`, `/logout`) y devuelve en `data.token`
+    un JWT HS256 (claims `user_id`, `email`, `iat`, `exp`; vence en 1 hora)
+    que el microservicio de libros exige en `Authorization: Bearer <token>`
+    para POST, PUT, PATCH y DELETE.
     ---
     tags:
       - Autenticación
@@ -339,6 +343,9 @@ def login():
                 email: ana@correo.com
                 es_admin: false
                 estado_cuenta: confirmado
+              token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+              token_type: Bearer
+              expires_in: 3600
           application/xml: |
             <?xml version="1.0" encoding="UTF-8"?>
             <response>
@@ -356,6 +363,9 @@ def login():
                   <es_admin>false</es_admin>
                   <estado_cuenta>confirmado</estado_cuenta>
                 </user>
+                <token>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</token>
+                <token_type>Bearer</token_type>
+                <expires_in>3600</expires_in>
               </data>
             </response>
       400:
@@ -397,8 +407,13 @@ def login():
     session.clear()                      # sesion nueva: evita fijacion de sesion
     session["id_usuario"] = fila[0]
     session.permanent = True
-    return success(formato, 200, "LOGIN_EXITOSO", "Sesión iniciada.",
-                   {"authenticated": True, "user": _user_data(fila)})
+    return success(formato, 200, "LOGIN_EXITOSO", "Sesión iniciada.", {
+        "authenticated": True,
+        "user": _user_data(fila),
+        "token": create_access_token(fila[0], fila[4]),
+        "token_type": "Bearer",
+        "expires_in": Config.JWT_EXPIRATION_SECONDS,
+    })
 
 
 # ============================================================

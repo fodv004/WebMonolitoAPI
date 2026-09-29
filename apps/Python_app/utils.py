@@ -13,7 +13,7 @@ def run_async(widget, fn, on_success=None, on_error=None):
         try:
             resultado = fn()
         except Exception as e:
-            widget.after(0, lambda: on_error(e) if on_error else None)
+            widget.after(0, lambda err=e: on_error(err) if on_error else None)
             return
         widget.after(0, lambda: on_success(resultado) if on_success else None)
 

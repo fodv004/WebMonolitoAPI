@@ -1,0 +1,366 @@
+=====================================================================
+ EG4 - PRUEBAS DE JWT, PATCH Y LOGGING (para capturas de pantalla)
+=====================================================================
+
+Servicios usados (ver instrucciones_jwt.txt para instalarlos y arrancarlos):
+  Login:   http://localhost:5000   (POST /login)
+  Libros:  http://localhost:5001   (/books, /books/<isbn>)
+
+Si pruebas contra la VM de GCP, reemplaza localhost por la IP de la VM
+(la app de escritorio tiene guardada http://34.51.119.20).
+
+IMPORTANTE SOBRE LAS RUTAS: en este proyecto el servicio de libros usa
+/books (sin el prefijo /api) y el identificador de TODAS las rutas es el
+ISBN. Donde la especificación dice /api/books/{id}, aquí es
+/books/<isbn>. Todos los comandos de abajo usan las rutas reales.
+
+Todas las peticiones llevan ?format=json para que la respuesta sea JSON
+(sin ese parámetro los servicios responden XML).
+
+Credenciales: reemplaza TU_CORREO y TU_PASSWORD por los de una cuenta
+YA CONFIRMADA (por correo) en el servicio login.
+
+Libro de prueba: las pruebas 9 a 13 crean, editan y borran el libro con
+ISBN 9990000000001, así no se tocan los libros existentes. La prueba 4
+lee el libro 9780000000001, que existe en los datos semilla del
+proyecto (02_seed_30_per_table.sql); si tu base no lo tiene, usa
+cualquier ISBN que aparezca en la prueba 3.
+
+Formato de los comandos:
+  - Mac/Linux (también Git Bash en Windows): bash.
+  - Windows: Símbolo del sistema (cmd). En cmd, "curl" es el curl real
+    de Windows. NO uses PowerShell para estos comandos: ahí "curl" es un
+    alias de Invoke-WebRequest y las comillas del JSON se rompen.
+  - La opción -i muestra el status y los headers de la respuesta:
+    aparecen en la captura junto con el body.
+
+
+---------------------------------------------------------------------
+ GUARDAR EL TOKEN EN UNA VARIABLE DE TERMINAL
+---------------------------------------------------------------------
+
+Mac/Linux (bash/zsh):
+
+  TOKEN=$(curl -s -X POST "http://localhost:5000/login?format=json" -H "Content-Type: application/json" -d '{"email":"TU_CORREO","password":"TU_PASSWORD"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
+  echo $TOKEN
+
+  (en Git Bash de Windows usa python en lugar de python3)
+  Uso posterior:  -H "Authorization: Bearer $TOKEN"
+
+Windows (cmd):
+
+  1) Haz login y copia el valor de "token" que aparece en data:
+     curl -s -X POST "http://localhost:5000/login?format=json" -H "Content-Type: application/json" -d "{\"email\":\"TU_CORREO\",\"password\":\"TU_PASSWORD\"}"
+
+  2) Guárdalo (pega el token completo, sin comillas):
+     set TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9....
+
+  3) Comprueba:
+     echo %TOKEN%
+
+  Uso posterior:  -H "Authorization: Bearer %TOKEN%"
+
+  Alternativa automática en cmd (si python está en el PATH):
+     for /f "delims=" %T in ('curl -s -X POST "http://localhost:5000/login?format=json" -H "Content-Type: application/json" -d "{\"email\":\"TU_CORREO\",\"password\":\"TU_PASSWORD\"}" ^| python -c "import sys,json; print(json.load(sys.stdin)['data']['token'])"') do set TOKEN=%T
+
+El token dura 1 hora. Si una prueba con token válido responde 403
+TOKEN_EXPIRADO, repite este paso.
+
+
+=====================================================================
+ PRUEBA 1 - Login correcto: 200 y token JWT
+=====================================================================
+Mac/Linux:
+  curl -i -X POST "http://localhost:5000/login?format=json" -H "Content-Type: application/json" -d '{"email":"TU_CORREO","password":"TU_PASSWORD"}'
+Windows (cmd):
+  curl -i -X POST "http://localhost:5000/login?format=json" -H "Content-Type: application/json" -d "{\"email\":\"TU_CORREO\",\"password\":\"TU_PASSWORD\"}"
+
+Resultado esperado: HTTP/1.1 200 OK
+  {"status": "ok", "code": "LOGIN_EXITOSO", "message": "Sesión iniciada.",
+   "data": {"authenticated": true,
+            "user": {"id_usuario": ..., "nombre": ..., "email": "TU_CORREO", ...},
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.....",
+            "token_type": "Bearer",
+            "expires_in": 3600}}
+Capturar: la línea 200 OK y el body con data.token, token_type y expires_in.
+Extra opcional: pega el token en https://jwt.io para mostrar el header
+(alg HS256) y los claims user_id, email, iat y exp (exp = iat + 3600).
+
+
+=====================================================================
+ PRUEBA 2 - Login con credenciales incorrectas: error y sin token
+=====================================================================
+Mac/Linux:
+  curl -i -X POST "http://localhost:5000/login?format=json" -H "Content-Type: application/json" -d '{"email":"TU_CORREO","password":"ClaveIncorrecta123"}'
+Windows (cmd):
+  curl -i -X POST "http://localhost:5000/login?format=json" -H "Content-Type: application/json" -d "{\"email\":\"TU_CORREO\",\"password\":\"ClaveIncorrecta123\"}"
+
+Resultado esperado: HTTP/1.1 401 UNAUTHORIZED
+  {"status": "error", "code": "CREDENCIALES_INVALIDAS",
+   "message": "Email o contraseña incorrectos."}
+Capturar: el 401 y que el body NO trae ningún campo token.
+
+
+=====================================================================
+ PRUEBA 3 - GET /books sin token: 200 (público)
+=====================================================================
+Mac/Linux y Windows (cmd), mismo comando:
+  curl -i "http://localhost:5001/books?format=json"
+
+Resultado esperado: HTTP/1.1 200 OK
+  [{"isbn": "9780000000001", "titulo": "...", "autor": "...", "anio": ...,
+    "precio": ..., "stock": ..., "formato": "...", ...}, ...]
+Capturar: el 200 y el inicio de la lista (sin header Authorization en el comando).
+
+
+=====================================================================
+ PRUEBA 4 - GET /books/<isbn> sin token: 200 (público)
+=====================================================================
+Mac/Linux y Windows (cmd), mismo comando:
+  curl -i "http://localhost:5001/books/9780000000001?format=json"
+
+Resultado esperado: HTTP/1.1 200 OK
+  {"isbn": "9780000000001", "titulo": "...", "anio": ..., "precio": ...,
+   "stock": ..., "formato": "...", "portada": ..., "href": "..."}
+Capturar: el 200 y el body del libro.
+
+
+=====================================================================
+ PRUEBA 5 - POST /books sin token: 401
+=====================================================================
+Mac/Linux:
+  curl -i -X POST "http://localhost:5001/books?format=json" -H "Content-Type: application/json" -d '{"isbn":"9990000000001","titulo":"Libro de prueba JWT","anio":2026,"precio":199.9,"stock":5,"formato":"Tapa dura"}'
+Windows (cmd):
+  curl -i -X POST "http://localhost:5001/books?format=json" -H "Content-Type: application/json" -d "{\"isbn\":\"9990000000001\",\"titulo\":\"Libro de prueba JWT\",\"anio\":2026,\"precio\":199.9,\"stock\":5,\"formato\":\"Tapa dura\"}"
+
+Resultado esperado: HTTP/1.1 401 UNAUTHORIZED
+  Header: WWW-Authenticate: Bearer realm="books"
+  {"error": "NO_AUTORIZADO",
+   "mensaje": "Falta el header Authorization. Envia 'Authorization: Bearer <token>'."}
+Capturar: el 401, el header WWW-Authenticate y el mensaje.
+
+
+=====================================================================
+ PRUEBA 6 - POST /books con header mal formado (sin "Bearer"): 401
+=====================================================================
+Mac/Linux:
+  curl -i -X POST "http://localhost:5001/books?format=json" -H "Content-Type: application/json" -H "Authorization: $TOKEN" -d '{"isbn":"9990000000001","titulo":"Libro de prueba JWT","anio":2026,"precio":199.9,"stock":5,"formato":"Tapa dura"}'
+Windows (cmd):
+  curl -i -X POST "http://localhost:5001/books?format=json" -H "Content-Type: application/json" -H "Authorization: %TOKEN%" -d "{\"isbn\":\"9990000000001\",\"titulo\":\"Libro de prueba JWT\",\"anio\":2026,\"precio\":199.9,\"stock\":5,\"formato\":\"Tapa dura\"}"
+
+Resultado esperado: HTTP/1.1 401 UNAUTHORIZED
+  {"error": "NO_AUTORIZADO",
+   "mensaje": "Formato de Authorization invalido. Se espera 'Bearer <token>'."}
+Capturar: el comando (se ve que falta la palabra Bearer) y el 401.
+
+
+=====================================================================
+ PRUEBA 7 - POST /books con token inválido (firma alterada): 403
+=====================================================================
+Primero se crea una copia del token con los últimos 5 caracteres
+(parte de la firma) cambiados por XXXXX:
+
+Mac/Linux:
+  BAD="${TOKEN%?????}XXXXX"
+  curl -i -X POST "http://localhost:5001/books?format=json" -H "Content-Type: application/json" -H "Authorization: Bearer $BAD" -d '{"isbn":"9990000000001","titulo":"Libro de prueba JWT","anio":2026,"precio":199.9,"stock":5,"formato":"Tapa dura"}'
+Windows (cmd):
+  set BAD=%TOKEN:~0,-5%XXXXX
+  curl -i -X POST "http://localhost:5001/books?format=json" -H "Content-Type: application/json" -H "Authorization: Bearer %BAD%" -d "{\"isbn\":\"9990000000001\",\"titulo\":\"Libro de prueba JWT\",\"anio\":2026,\"precio\":199.9,\"stock\":5,\"formato\":\"Tapa dura\"}"
+
+Resultado esperado: HTTP/1.1 403 FORBIDDEN
+  {"error": "TOKEN_INVALIDO", "mensaje": "La firma del token no es valida."}
+Capturar: el 403 y el mensaje de firma inválida.
+
+
+=====================================================================
+ PRUEBA 8 - POST /books con token expirado: 403
+=====================================================================
+Generar un token ya expirado (iat hace 2 horas, exp hace 1 hora) con el
+MISMO JWT_SECRET. Ejecuta el comando en una terminal donde JWT_SECRET
+esté definido (ver instrucciones_jwt.txt, paso 2.3) y con un Python que
+tenga PyJWT (por ejemplo el del .venv del servicio login).
+
+Comando de una línea (igual en Mac/Linux y Windows cmd):
+  python -c "import jwt,os,time; t=int(time.time()); print(jwt.encode({'user_id':1,'email':'expirado@prueba.com','iat':t-7200,'exp':t-3600}, os.environ['JWT_SECRET'], algorithm='HS256'))"
+
+Guardarlo en una variable:
+  Mac/Linux:
+    EXPIRED=$(python3 -c "import jwt,os,time; t=int(time.time()); print(jwt.encode({'user_id':1,'email':'expirado@prueba.com','iat':t-7200,'exp':t-3600}, os.environ['JWT_SECRET'], algorithm='HS256'))")
+  Windows (cmd): copia la salida del comando y ejecuta
+    set EXPIRED=eyJ...(pega aquí el token impreso)
+
+Petición:
+Mac/Linux:
+  curl -i -X POST "http://localhost:5001/books?format=json" -H "Content-Type: application/json" -H "Authorization: Bearer $EXPIRED" -d '{"isbn":"9990000000001","titulo":"Libro de prueba JWT","anio":2026,"precio":199.9,"stock":5,"formato":"Tapa dura"}'
+Windows (cmd):
+  curl -i -X POST "http://localhost:5001/books?format=json" -H "Content-Type: application/json" -H "Authorization: Bearer %EXPIRED%" -d "{\"isbn\":\"9990000000001\",\"titulo\":\"Libro de prueba JWT\",\"anio\":2026,\"precio\":199.9,\"stock\":5,\"formato\":\"Tapa dura\"}"
+
+Resultado esperado: HTTP/1.1 403 FORBIDDEN
+  {"error": "TOKEN_EXPIRADO", "mensaje": "El token expiro. Inicia sesion de nuevo."}
+Capturar: el comando python que genera el token, el 403 y el mensaje
+TOKEN_EXPIRADO (distinto al de la prueba 7: aquí la firma es válida pero
+la fecha exp ya pasó).
+
+
+=====================================================================
+ PRUEBA 9 - POST /books con token válido: 201
+=====================================================================
+Mac/Linux:
+  curl -i -X POST "http://localhost:5001/books?format=json" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"isbn":"9990000000001","titulo":"Libro de prueba JWT","anio":2026,"precio":199.9,"stock":5,"formato":"Tapa dura","autor":"Autor JWT","genero":"Ciencia"}'
+Windows (cmd):
+  curl -i -X POST "http://localhost:5001/books?format=json" -H "Content-Type: application/json" -H "Authorization: Bearer %TOKEN%" -d "{\"isbn\":\"9990000000001\",\"titulo\":\"Libro de prueba JWT\",\"anio\":2026,\"precio\":199.9,\"stock\":5,\"formato\":\"Tapa dura\",\"autor\":\"Autor JWT\",\"genero\":\"Ciencia\"}"
+
+Resultado esperado: HTTP/1.1 201 CREATED
+  {"isbn": "9990000000001", "titulo": "Libro de prueba JWT", "anio": 2026,
+   "precio": 199.9, "stock": 5, "formato": "Tapa dura", "autor": "Autor JWT",
+   "genero": "Ciencia", "portada": null, "image_url": null, "href": "..."}
+Capturar: el 201 y el libro creado.
+(Si respondiera 409 ISBN_DUPLICADO, el libro ya existe de una corrida
+anterior: bórralo con la prueba 13 y repite.)
+
+
+=====================================================================
+ PRUEBA 10 - PUT /books/<isbn> con token válido: 200
+=====================================================================
+Mac/Linux:
+  curl -i -X PUT "http://localhost:5001/books/9990000000001?format=json" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"titulo":"Libro de prueba JWT (PUT)","anio":2025,"precio":249.5,"stock":10,"formato":"Digital"}'
+Windows (cmd):
+  curl -i -X PUT "http://localhost:5001/books/9990000000001?format=json" -H "Content-Type: application/json" -H "Authorization: Bearer %TOKEN%" -d "{\"titulo\":\"Libro de prueba JWT (PUT)\",\"anio\":2025,\"precio\":249.5,\"stock\":10,\"formato\":\"Digital\"}"
+
+Resultado esperado: HTTP/1.1 200 OK
+  {"isbn": "9990000000001", "titulo": "Libro de prueba JWT (PUT)", "anio": 2025,
+   "precio": 249.5, "stock": 10, "formato": "Digital", ...}
+Capturar: el 200 y los valores actualizados.
+
+
+=====================================================================
+ PRUEBA 11 - PATCH /books/<isbn> con token válido, un solo campo: 200
+=====================================================================
+Paso A - estado antes (anota los valores):
+  curl -s "http://localhost:5001/books/9990000000001?format=json"
+
+Paso B - PATCH enviando SOLO stock:
+Mac/Linux:
+  curl -i -X PATCH "http://localhost:5001/books/9990000000001?format=json" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"stock":42}'
+Windows (cmd):
+  curl -i -X PATCH "http://localhost:5001/books/9990000000001?format=json" -H "Content-Type: application/json" -H "Authorization: Bearer %TOKEN%" -d "{\"stock\":42}"
+
+Paso C - verificar con GET:
+  curl -s "http://localhost:5001/books/9990000000001?format=json"
+
+Resultado esperado:
+  Paso B: HTTP/1.1 200 OK con el libro completo y "stock": 42.
+  Paso C: stock = 42 y titulo ("Libro de prueba JWT (PUT)"), anio (2025),
+          precio (249.5) y formato ("Digital") IGUALES al paso A.
+Capturar: los tres comandos con sus salidas en la misma pantalla para
+que se vea que solo cambió stock.
+Extra opcional: PATCH a un ISBN inexistente (p. ej. 9990000000099) con
+token válido responde 404 {"error": "LIBRO_NO_ENCONTRADO", ...}.
+
+
+=====================================================================
+ PRUEBA 12 - PATCH /books/<isbn> sin token: 401
+=====================================================================
+Mac/Linux:
+  curl -i -X PATCH "http://localhost:5001/books/9990000000001?format=json" -H "Content-Type: application/json" -d '{"stock":1}'
+Windows (cmd):
+  curl -i -X PATCH "http://localhost:5001/books/9990000000001?format=json" -H "Content-Type: application/json" -d "{\"stock\":1}"
+
+Resultado esperado: HTTP/1.1 401 UNAUTHORIZED
+  {"error": "NO_AUTORIZADO",
+   "mensaje": "Falta el header Authorization. Envia 'Authorization: Bearer <token>'."}
+Capturar: el 401. (Un GET posterior sigue mostrando stock 42.)
+
+
+=====================================================================
+ PRUEBA 13 - DELETE /books/<isbn>: sin token 401, con token 200
+=====================================================================
+Paso A - sin token (Mac/Linux y Windows cmd, mismo comando):
+  curl -i -X DELETE "http://localhost:5001/books/9990000000001?format=json"
+
+  Resultado esperado: HTTP/1.1 401 UNAUTHORIZED
+    {"error": "NO_AUTORIZADO", "mensaje": "Falta el header Authorization. ..."}
+
+Paso B - con token:
+Mac/Linux:
+  curl -i -X DELETE "http://localhost:5001/books/9990000000001?format=json" -H "Authorization: Bearer $TOKEN"
+Windows (cmd):
+  curl -i -X DELETE "http://localhost:5001/books/9990000000001?format=json" -H "Authorization: Bearer %TOKEN%"
+
+  Resultado esperado: HTTP/1.1 200 OK
+    {"isbn": "9990000000001", "mensaje": "Libro 9990000000001 eliminado.", "status": "ok"}
+
+Paso C (opcional) - confirmar:
+  curl -i "http://localhost:5001/books/9990000000001?format=json"
+  -> 404 {"error": "LIBRO_NO_ENCONTRADO", ...}
+Capturar: el 401 del paso A y el 200 del paso B.
+
+
+=====================================================================
+ PRUEBA 14 - App Tkinter: login, crear y editar con log en consola
+=====================================================================
+1) Abre una terminal y arranca la app desde ahí:
+     cd apps/Python_app        (Windows: cd apps\Python_app)
+     python main.py
+   Acomoda la ventana de la app y la terminal lado a lado.
+2) Si los servicios corren en tu máquina: botón Configuración, pon
+   http://localhost:5000 y http://localhost:5001 y Guardar.
+3) Inicia sesión con TU_CORREO / TU_PASSWORD.
+   - Barra superior: "Sesión iniciada como TU_CORREO".
+   - Barra inferior (verde): "200 Sesión iniciada (token JWT recibido)".
+   - Consola: bloque ">>> PETICION  POST http://.../login?format=json"
+     con el body (password = ********) y "<<< RESPUESTA  Status: 200 OK"
+     con el body que incluye data.token.
+4) Clic en "+ Crear libro" (verde). Llena ISBN 9990000000002, Título,
+   Año, Precio, Stock y Formato; clic en Crear.
+   - Barra inferior (verde): "201 Libro creado (9990000000002)".
+   - Consola: "POST http://.../books?format=json", en Headers la línea
+     "Authorization: Bearer eyJ...", el body JSON enviado, y en la
+     respuesta "Status: 201 CREATED" con el libro.
+5) Selecciona el libro en la tabla y clic en "Editar (PUT)" (azul);
+   cambia el título y guarda.
+   - Barra inferior: "200 Libro actualizado con PUT (...)".
+   - Consola: bloque PUT con Authorization: Bearer, body y Status: 200.
+6) Con el libro seleccionado clic en "Editar parcial (PATCH)" (naranja);
+   cambia solo el Stock y guarda.
+   - Barra inferior: "200 Libro actualizado parcialmente con PATCH (...): stock".
+   - Consola: bloque PATCH cuyo body es solo {"stock": ...}.
+7) Tras cada escritura verás también un GET /books (recarga de la
+   tabla) SIN header Authorization: los GET no llevan token.
+Capturar: la app y la terminal juntas mostrando, para el POST y el PUT
+(y el PATCH), el método, la URL, la línea Authorization: Bearer, el
+body, el status y la respuesta.
+Al final puedes borrar el libro 9990000000002 con el botón Eliminar
+(rojo) y capturar el bloque DELETE.
+
+
+=====================================================================
+ PRUEBA 15 - App Tkinter: forzar 401/403 y ver el aviso
+=====================================================================
+Opción A (rápida, 403 por firma inválida):
+  1) Con la app abierta y la sesión iniciada (prueba 14), detén el
+     servicio de libros (Ctrl+C).
+  2) Arráncalo de nuevo con OTRO secreto en esa terminal:
+       Windows (cmd):   set JWT_SECRET=otro_secreto_distinto
+       Mac/Linux:       export JWT_SECRET=otro_secreto_distinto
+     y luego el comando de arranque de instrucciones_jwt.txt (4.2).
+  3) En la app, selecciona un libro y pulsa "Editar (PUT)" o
+     "Editar parcial (PATCH)" y guarda (o pulsa Eliminar).
+  Resultado esperado:
+    - Ventana de error "Sesión no válida (403)": "Tu sesión no es válida
+      o ya expiró. Detalle del servidor: La firma del token no es
+      valida. Inicia sesión de nuevo para continuar."
+    - Barra inferior en rojo: "403 Sesión expirada o token inválido (...)".
+    - La app regresa al login y la barra superior dice "Sin sesión".
+    - Consola: bloque de la petición con Authorization: Bearer y
+      respuesta "Status: 403 FORBIDDEN" con {"error": "TOKEN_INVALIDO", ...}.
+  4) Restaura el secreto correcto (cierra esa terminal o vuelve a
+     definir JWT_SECRET con el valor original) y reinicia el servicio.
+
+Opción B (token realmente expirado): inicia sesión en la app, déjala
+abierta más de 1 hora y luego intenta editar o eliminar. El resultado
+es igual al de la opción A, pero el detalle dice "El token expiro.
+Inicia sesion de nuevo." y el body trae "TOKEN_EXPIRADO".
+
+Capturar: el cuadro de error sobre la app, la barra de estado roja y,
+en la terminal, el bloque de la petición con su respuesta 403.

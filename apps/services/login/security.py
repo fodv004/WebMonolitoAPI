@@ -7,11 +7,17 @@ Hash de contrasenas y tokens de confirmacion.
   el monolito y viceversa. Solo se guarda el hash; nunca la contrasena.
 * Tokens: 256 bits aleatorios (secrets). En BD solo se guarda su SHA-256, de
   modo que una fuga de la tabla no permite confirmar cuentas.
+* JWT de acceso: HS256 firmado con JWT_SECRET (PyJWT). Claims user_id,
+  email, iat y exp (1 hora). Lo valida el microservicio de libros.
 """
 import hashlib
 import secrets
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
+import jwt
+
+from config import Config
 
 BCRYPT_ROUNDS = 12
 # bcrypt solo considera los primeros 72 bytes de la contrasena.
@@ -49,3 +55,15 @@ def new_token():
 
 def token_digest(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_access_token(user_id, email):
+    """JWT HS256 con user_id, email, iat y exp (iat + 1 hora)."""
+    ahora = datetime.now(timezone.utc)
+    payload = {
+        "user_id": user_id,
+        "email": email,
+        "iat": ahora,
+        "exp": ahora + timedelta(seconds=Config.JWT_EXPIRATION_SECONDS),
+    }
+    return jwt.encode(payload, Config.JWT_SECRET, algorithm=Config.JWT_ALGORITHM)

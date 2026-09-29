@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from api_client import ApiError
+from ui import theme
 from utils import run_async
 
 _CAMPOS = [
@@ -21,30 +22,27 @@ _CAMPOS = [
 
 class RegisterScreen(ttk.Frame):
     def __init__(self, parent, app):
-        super().__init__(parent, padding=24)
+        super().__init__(parent)
         self.app = app
 
-        ttk.Label(self, text="Crear cuenta", font=("Segoe UI", 18, "bold")).grid(
-            row=0, column=0, columnspan=2, pady=(0, 16))
+        tarjeta = theme.tarjeta_centrada(self, "Crear cuenta", "Te enviaremos un correo para confirmarla")
 
         self.vars = {}
-        for i, (clave, etiqueta) in enumerate(_CAMPOS, start=1):
-            ttk.Label(self, text=etiqueta).grid(row=i, column=0, sticky="e", pady=4)
+        for i, (clave, etiqueta) in enumerate(_CAMPOS, start=3):
             var = tk.StringVar()
-            mostrar = "*" if clave == "password" else ""
-            ttk.Entry(self, textvariable=var, width=32, show=mostrar).grid(row=i, column=1, pady=4)
+            theme.campo(tarjeta, i, etiqueta, var, show="•" if clave == "password" else "")
             self.vars[clave] = var
 
+        fila = 3 + len(_CAMPOS)
         self.estado_var = tk.StringVar()
-        ttk.Label(self, textvariable=self.estado_var, foreground="#b91c1c", wraplength=340).grid(
-            row=len(_CAMPOS) + 1, column=0, columnspan=2, pady=(8, 0))
+        self._estado_label = ttk.Label(tarjeta, textvariable=self.estado_var, style="Error.TLabel", wraplength=360)
+        self._estado_label.grid(row=fila, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-        botones = ttk.Frame(self)
-        botones.grid(row=len(_CAMPOS) + 2, column=0, columnspan=2, pady=16)
-        self.boton_registrar = ttk.Button(botones, text="Registrar", command=self._registrar)
-        self.boton_registrar.grid(row=0, column=0, padx=4)
-        ttk.Button(botones, text="Volver a iniciar sesión", command=lambda: app.mostrar("login")).grid(
-            row=0, column=1, padx=4)
+        self.boton_registrar = ttk.Button(tarjeta, text="Registrar", style="Primary.TButton",
+                                          command=self._registrar)
+        self.boton_registrar.grid(row=fila + 1, column=0, columnspan=2, sticky="ew", pady=(14, 8))
+        ttk.Button(tarjeta, text="Volver a iniciar sesión", command=lambda: app.mostrar("login")).grid(
+            row=fila + 2, column=0, columnspan=2, sticky="ew")
 
     def on_show(self):
         self.estado_var.set("")
@@ -55,6 +53,7 @@ class RegisterScreen(ttk.Frame):
         datos = {clave: var.get().strip() if clave != "password" else var.get()
                  for clave, var in self.vars.items()}
         if not all(datos.values()):
+            self._estado_label.configure(style="Error.TLabel")
             self.estado_var.set("Todos los campos son obligatorios.")
             return
 
@@ -66,11 +65,18 @@ class RegisterScreen(ttk.Frame):
 
         def ok(respuesta):
             self.boton_registrar.state(["!disabled"])
-            self.estado_var.set(respuesta.get("message", "Cuenta creada. Revisa tu correo para confirmarla."))
+            mensaje = respuesta.get("message", "Cuenta creada. Revisa tu correo para confirmarla.")
+            self._estado_label.configure(style="Subtitulo.TLabel")
+            self.estado_var.set(mensaje)
+            self.app.set_estado(f"201 {mensaje}", "ok")
             self.after(1800, lambda: self.app.mostrar("login"))
 
         def error(e):
             self.boton_registrar.state(["!disabled"])
-            self.estado_var.set(e.mensaje if isinstance(e, ApiError) else str(e))
+            self._estado_label.configure(style="Error.TLabel")
+            mensaje = e.mensaje if isinstance(e, ApiError) else str(e)
+            self.estado_var.set(mensaje)
+            if isinstance(e, ApiError):
+                self.app.set_estado(f"{e.status or '—'} {mensaje}", "error")
 
         run_async(self, hacer, ok, error)

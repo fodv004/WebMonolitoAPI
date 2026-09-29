@@ -1,0 +1,4 @@
+{
+  "login_base_url": "http://34.51.119.20:5000",
+  "books_base_url": "http://34.51.119.20:5001"
+}

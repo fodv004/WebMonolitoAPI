@@ -52,6 +52,20 @@ class Config:
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000").rstrip("/")
     CONFIRM_TOKEN_HOURS = int(os.getenv("CONFIRM_TOKEN_HOURS", "24"))
 
+    # JWT que emite POST /login y que valida el microservicio de libros.
+    # El secreto DEBE ser el mismo en ambos servicios.
+    JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
+    JWT_ALGORITHM = "HS256"
+    JWT_EXPIRATION_SECONDS = 3600  # 1 hora
+
+
+if not Config.JWT_SECRET:
+    raise SystemExit(
+        "ERROR: la variable de entorno JWT_SECRET no esta definida. "
+        "El microservicio de login no puede firmar tokens sin ella. "
+        "Definela en el .env o en la terminal (con el MISMO valor que en el servicio de libros) "
+        "y vuelve a arrancar."
+    )
 
 if not Config.SECRET_KEY:
     Config.SECRET_KEY = secrets.token_hex(32)

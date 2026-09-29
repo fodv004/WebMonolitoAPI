@@ -1,0 +1,315 @@
+=====================================================================
+ EG4 - PROTECCIÓN JWT DEL SERVICIO DE LIBROS, PATCH Y LOGGING HTTP
+=====================================================================
+
+Piezas involucradas y puertos:
+
+  Servicio login (Flask)        apps/services/login                   puerto 5000
+  Servicio de libros (Flask)    apps/services/library_soap_service    puerto 5001
+  App de escritorio (Tkinter)   apps/Python_app                       (cliente)
+
+Los dos servicios son Flask (Python), por eso JWT se implementa con la
+librería PyJWT. No hay servicios Express ni Docker en este proyecto.
+
+
+=====================================================================
+ 1. INSTALAR DEPENDENCIAS  (hacer esto primero)
+=====================================================================
+
+JWT no viene incluido en Python ni en Flask: es una librería aparte que
+hay que instalar en CADA servicio (cada uno tiene su propio entorno
+virtual .venv). Ya la agregué a los requirements.txt, así que basta con
+reinstalar los requirements de cada carpeta.
+
+ADVERTENCIA: el paquete correcto se llama PyJWT. NO instales el paquete
+"jwt" (pip install jwt): es otra librería distinta que también se importa
+como "import jwt" y rompe el código (no tiene jwt.encode/jwt.decode con
+la misma firma). Si lo instalaste por error:
+  pip uninstall jwt
+  pip install PyJWT
+
+1.1 Servicio login  (en la carpeta apps/services/login)
+
+  Windows:
+    cd apps\services\login
+    python -m venv .venv                         (solo si aún no existe)
+    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+  Mac/Linux:
+    cd apps/services/login
+    python3 -m venv .venv                        (solo si aún no existe)
+    .venv/bin/python -m pip install -r requirements.txt
+
+  Equivale a instalar solo lo nuevo con:  pip install PyJWT==2.10.1
+  Archivo actualizado: apps/services/login/requirements.txt  (+ PyJWT==2.10.1)
+
+1.2 Servicio de libros  (en la carpeta apps/services/library_soap_service)
+
+  Windows:
+    cd apps\services\library_soap_service
+    python -m venv .venv                         (solo si aún no existe)
+    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+  Mac/Linux:
+    cd apps/services/library_soap_service
+    python3 -m venv .venv                        (solo si aún no existe)
+    .venv/bin/python -m pip install -r requirements.txt
+
+  Equivale a instalar solo lo nuevo con:  pip install PyJWT==2.10.1
+  Archivo actualizado: apps/services/library_soap_service/requirements.txt  (+ PyJWT==2.10.1)
+
+1.3 App de escritorio  (en la carpeta apps/Python_app)
+
+  La app ahora usa la librería requests para centralizar las peticiones
+  y el log. Tkinter ya viene con Python.
+
+  Windows:
+    cd apps\Python_app
+    python -m pip install -r requirements.txt
+
+  Mac/Linux:
+    cd apps/Python_app
+    python3 -m pip install -r requirements.txt
+
+  Equivale a:  pip install requests
+  Archivo creado: apps/Python_app/requirements.txt  (requests==2.32.3)
+
+  En Linux, si falta Tkinter:  sudo apt install python3-tk
+
+1.4 (Opcional) Para generar el token expirado de la prueba 8 de
+    pruebas.txt necesitas PyJWT en el Python con el que ejecutes el
+    comando. Lo más simple es usar el Python del .venv del servicio login.
+
+No hay Docker ni docker-compose en el proyecto: no hay nada que reconstruir.
+Si los servicios ya estaban corriendo, deténlos (Ctrl+C) y vuelve a
+arrancarlos después de instalar y configurar JWT_SECRET.
+
+
+=====================================================================
+ 2. CONFIGURAR JWT_SECRET
+=====================================================================
+
+JWT_SECRET es la clave con la que el servicio login FIRMA el token y con
+la que el servicio de libros VERIFICA la firma. Debe tener EXACTAMENTE
+el mismo valor en los dos servicios. Nunca se escribe en el código.
+
+Si JWT_SECRET no está definido, cualquiera de los dos servicios se niega
+a arrancar y muestra:
+  ERROR: la variable de entorno JWT_SECRET no esta definida. ...
+
+2.1 Generar un secreto (una sola vez):
+
+    python -c "import secrets; print(secrets.token_hex(32))"
+
+  Copia el resultado; en los ejemplos de abajo aparece como TU_SECRETO.
+
+2.2 Opción recomendada: archivo .env (el proyecto ya lo usa con python-dotenv)
+
+  Agrega esta línea, con el MISMO valor, en los dos archivos:
+
+    apps/services/login/.env
+    apps/services/library_soap_service/.env
+
+      JWT_SECRET=TU_SECRETO
+
+  Los .env.example de ambos servicios ya incluyen la línea JWT_SECRET=
+  como referencia.
+
+2.3 Opción alternativa: variable en la terminal (antes de arrancar cada
+    servicio, en la MISMA terminal donde lo arrancas)
+
+  Windows - Símbolo del sistema (cmd):
+    set JWT_SECRET=TU_SECRETO
+
+  Windows - PowerShell:
+    $env:JWT_SECRET = "TU_SECRETO"
+
+  Mac/Linux (bash/zsh):
+    export JWT_SECRET=TU_SECRETO
+
+  La variable de la terminal tiene prioridad sobre el .env (python-dotenv
+  no sobrescribe variables ya definidas).
+
+AVISO IMPORTANTE: si el valor de JWT_SECRET es distinto entre login y
+libros, el login funcionará y entregará token, pero TODAS las escrituras
+(POST, PUT, PATCH, DELETE) al servicio de libros responderán
+403 {"error": "TOKEN_INVALIDO", "mensaje": "La firma del token no es valida."}.
+Tras cambiar JWT_SECRET hay que reiniciar el servicio y volver a hacer
+login para obtener un token nuevo.
+
+
+=====================================================================
+ 3. CAMBIOS REALIZADOS
+=====================================================================
+
+3.1 Servicio login  (apps/services/login)
+
+  config.py          Lee JWT_SECRET del entorno; define HS256 y expiración
+                     de 3600 s (1 hora). Si falta JWT_SECRET, el servicio
+                     termina al arrancar con un mensaje claro.
+  security.py        Nueva función create_access_token(user_id, email):
+                     emite el JWT HS256 con PyJWT y los claims user_id,
+                     email, iat y exp.
+  routes.py          POST /login agrega en data los campos token,
+                     token_type ("Bearer") y expires_in (3600). El resto de
+                     la respuesta (status, code, message, data.user) no cambia.
+                     Se actualizó la documentación Swagger del endpoint.
+  requirements.txt   + PyJWT==2.10.1
+  .env.example       + JWT_SECRET= con explicación.
+
+  POST /login y POST /register siguen siendo públicos. Como antes, las
+  respuestas son XML por omisión y JSON con ?format=json; el token viene
+  en data.token en ambos formatos.
+
+3.2 Servicio de libros  (apps/services/library_soap_service)
+
+  api/auth_jwt.py    NUEVO. Decorador @jwt_requerido: lee
+                     Authorization: Bearer <token> y valida la firma con
+                     JWT_SECRET (HS256, exige exp e iat).
+                       - sin header o sin formato "Bearer <token>": 401
+                         {"error": "NO_AUTORIZADO", "mensaje": ...}
+                       - firma inválida o token mal formado: 403
+                         {"error": "TOKEN_INVALIDO", "mensaje": ...}
+                       - token expirado: 403
+                         {"error": "TOKEN_EXPIRADO", "mensaje": ...}
+                     Si falta JWT_SECRET, el servicio no arranca.
+  api/rest.py        @jwt_requerido aplicado SOLO a POST /books,
+                     PUT /books/<isbn>, PATCH /books/<isbn> y
+                     DELETE /books/<isbn>. Los GET siguen públicos.
+                     Nuevo endpoint PATCH /books/<isbn> (actualización
+                     parcial): usa la misma función que PUT, así que tiene
+                     las mismas validaciones, el mismo 404 si el libro no
+                     existe y la misma respuesta (la tarjeta JSON del libro).
+  requirements.txt   + PyJWT==2.10.1
+  .env.example       + JWT_SECRET= con explicación.
+
+  El endpoint /soap, /books/gallery, /cloud-concepts, /formats y /health
+  no se modificaron.
+
+3.3 App de escritorio  (apps/Python_app)
+
+  api_client.py      Reescrito sobre requests. Toda petición pasa por
+                     _HttpClient._request, que imprime en consola la
+                     petición (método, URL completa, headers con el Bearer
+                     visible, body) y la respuesta (status, headers, body)
+                     con separadores. Guarda el JWT en memoria y lo adjunta
+                     automáticamente en POST, PUT, PATCH y DELETE al
+                     servicio de libros (los GET van sin token). Nuevo
+                     método patch_book(). ApiError.es_sesion_invalida
+                     detecta 401/403.
+  main.py            Token solo en memoria (nunca en disco). Barra superior
+                     con el nombre de la app y "Sesión iniciada como <email>"
+                     / "Sin sesión". Barra de estado inferior verde/roja con
+                     el último resultado. sesion_invalida(): ante 401/403
+                     muestra el aviso, borra el token y regresa al login.
+  ui/theme.py        NUEVO. Paleta en constantes (fondo, principal, texto,
+                     éxito, advertencia, peligro...), tipografía Segoe UI y
+                     todos los estilos ttk (tema clam): botones por color
+                     con hover, Treeview con encabezado de color, filas
+                     alternadas y selección resaltada, tarjetas centradas.
+  ui/login_screen.py Tarjeta centrada; guarda data.token al iniciar sesión.
+  ui/register_screen.py, ui/config_screen.py
+                     Mismo diseño de tarjeta centrada; misma lógica.
+  ui/catalog_screen.py
+                     Las tarjetas se reemplazaron por una tabla Treeview.
+                     Botones: + Crear libro (verde), Editar (PUT) (azul),
+                     Editar parcial (PATCH) (naranja), Eliminar (rojo) y
+                     Ver portada. Se conservan buscar, mostrar todos,
+                     actualizar catálogo, semáforo, configuración y cerrar
+                     sesión. Doble clic en una fila = editar.
+  ui/book_form.py    Modo nuevo "patch": envía solo los campos que
+                     cambiaste. Crear y editar (PUT) mantienen sus
+                     validaciones. Un 401/403 cierra el formulario y pide
+                     iniciar sesión.
+  requirements.txt   NUEVO: requests.
+  README.md          Actualizado (dependencias, JWT, PATCH, logging).
+
+  Detalles del log:
+    - El campo "password" de los bodies se muestra como ******** para no
+      dejar contraseñas en la consola ni en las capturas.
+    - Bodies de más de 4000 caracteres (el catálogo completo) se recortan.
+    - Las consultas periódicas de /health del semáforo (cada 8 s) no se
+      imprimen para no llenar la consola. Para verlas, cambia
+      LOG_HEALTH_CHECKS = True en api_client.py.
+
+3.4 NOTA SOBRE RUTAS E IDENTIFICADORES (inconsistencia documentada)
+
+  La especificación menciona /api/books, /api/books/{isbn} y
+  /api/books/{id}. En el código real el servicio de libros expone las
+  rutas SIN el prefijo /api:
+
+      GET    /books              (público)
+      GET    /books/<isbn>       (público)
+      POST   /books              (protegido)
+      PUT    /books/<isbn>       (protegido)
+      PATCH  /books/<isbn>       (protegido, nuevo)
+      DELETE /books/<isbn>       (protegido)
+
+  Además, TODAS las rutas identifican el libro por ISBN (la tabla libros
+  no tiene columna id; isbn VARCHAR(13) es la llave primaria). Por eso
+  {id} en la especificación equivale a <isbn>. No renombré las rutas para
+  no romper a la app de escritorio, a la app Electron (que consume
+  GET /books) ni la documentación existente.
+
+
+=====================================================================
+ 4. CÓMO ARRANCAR CADA SERVICIO  (ya con dependencias y JWT_SECRET)
+=====================================================================
+
+Requisito previo: PostgreSQL arriba con la base "library" (y Mailpit si
+vas a registrar usuarios), como en INSTRUCCIONES.txt.
+
+Orden recomendado:
+  1) PostgreSQL (y Mailpit)
+  2) Servicio login          (puerto 5000)
+  3) Servicio de libros      (puerto 5001)
+  4) App de escritorio
+
+Usa una terminal distinta para cada servicio y otra para la app.
+
+4.1 Servicio login
+  Windows:    cd apps\services\login
+              .\.venv\Scripts\python.exe app.py
+  Mac/Linux:  cd apps/services/login
+              .venv/bin/python app.py
+  Puerto:     5000  (FLASK_PORT en .env)
+  URL base:   http://localhost:5000
+  Swagger:    http://localhost:5000/apidocs/
+
+4.2 Servicio de libros
+  Windows:    cd apps\services\library_soap_service
+              .\.venv\Scripts\python.exe app.py
+  Mac/Linux:  cd apps/services/library_soap_service
+              .venv/bin/python app.py
+  Puerto:     5001  (FLASK_PORT en .env)
+  URL base:   http://localhost:5001   (catálogo: http://localhost:5001/books)
+
+4.3 App de escritorio
+  Lánzala SIEMPRE desde una terminal (no con doble clic) para poder ver
+  el log de peticiones y respuestas:
+  Windows:    cd apps\Python_app
+              python main.py
+  Mac/Linux:  cd apps/Python_app
+              python3 main.py
+
+  La app usa las URLs guardadas en apps/Python_app/local_storage.json.
+  Actualmente apuntan a la VM (http://34.51.119.20:5000 y :5001). Si
+  corres los servicios en tu máquina, cámbialas en la pantalla
+  Configuración a http://localhost:5000 y http://localhost:5001.
+
+4.4 Verificar que cada servicio está arriba
+
+  Login:
+    curl http://localhost:5000/health?format=json
+    -> 200 {"status":"ok","code":"SERVICIO_SALUDABLE",...}
+
+  Libros:
+    curl http://localhost:5001/health?format=json
+    -> 200 {"service":"books","status":"ok"}
+
+  En Windows PowerShell escribe curl.exe en lugar de curl.
+
+  En la app, el semáforo del catálogo (Login / Libros) debe verse verde.
+
+  Si un servicio no arranca y muestra "JWT_SECRET no esta definida",
+  revisa el paso 2.
