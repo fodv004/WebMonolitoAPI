@@ -34,6 +34,7 @@ class SemaforoPanel(tk.Frame):
         self._en_curso = set()        # servicios con una revision todavia sin responder
         self._after_id = None
         self._luces = {}
+        self._oyentes = []            # funciones(servicio, ok) avisadas tras cada revision
 
         tk.Label(self, text="Servicios", font=theme.FUENTE_NEGRITA, background=theme.COLOR_SUPERFICIE,
                  foreground=theme.COLOR_TEXTO).pack(side="left", padx=(0, 14))
@@ -56,6 +57,16 @@ class SemaforoPanel(tk.Frame):
         self._ultima_var = tk.StringVar(value="Sin revisar")
         tk.Label(self, textvariable=self._ultima_var, font=theme.FUENTE_PEQUENA,
                  background=theme.COLOR_SUPERFICIE, foreground=theme.COLOR_TEXTO_SUAVE).pack(side="right", padx=10)
+
+    # ------------------------------------------------------------ estado para las pantallas
+    def al_cambiar(self, funcion):
+        """Registra funcion(servicio, ok): se llama (en el hilo de Tk) tras cada revision."""
+        self._oyentes.append(funcion)
+
+    def en_rojo(self, servicio):
+        """True solo si la ultima revision de ese servicio fallo (sin revisar todavia = False)."""
+        resultado = self.resultados.get(servicio)
+        return resultado is not None and not resultado["ok"]
 
     # ------------------------------------------------------------ ciclo
     def iniciar(self):
@@ -84,6 +95,8 @@ class SemaforoPanel(tk.Frame):
         lienzo, luz = self._luces[servicio]
         lienzo.itemconfigure(luz, fill=theme.COLOR_EXITO if resultado["ok"] else theme.COLOR_PELIGRO)
         self._ultima_var.set(f"Última revisión: {resultado['hora']:%H:%M:%S}")
+        for oyente in self._oyentes:
+            oyente(servicio, resultado["ok"])
 
     # ------------------------------------------------------------ detalle
     def _detalle(self, servicio):

@@ -154,9 +154,10 @@ class HttpClient:
         return getattr(self._local, "status", None)
 
     def request(self, method, path, data=None, auth=True, registrar=True, timeout=None, token=None,
-                _reintento=False):
+                params=None, _reintento=False):
         """`auth=False` no envia Authorization. `token` envia ese JWT en lugar del de la
-        sesion (y entonces un 401 no dispara la renovacion)."""
+        sesion (y entonces un 401 no dispara la renovacion). `params` son parametros de
+        consulta adicionales (los None se omiten)."""
         url = f"{self.base_url}{path}"
         headers = {"Accept": "application/json"}
         renovable = token is None and not _reintento
@@ -165,7 +166,9 @@ class HttpClient:
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
-        req = requests.Request(method, url, params={"format": "json"}, json=data, headers=headers)
+        consulta = {"format": "json"}
+        consulta.update({k: v for k, v in (params or {}).items() if v is not None and v != ""})
+        req = requests.Request(method, url, params=consulta, json=data, headers=headers)
         prep = self._session.prepare_request(req)
 
         if registrar:
@@ -195,7 +198,7 @@ class HttpClient:
             # Un solo intento de renovacion; si funciona se repite la peticion con el token nuevo.
             if self.sesion.renovar(token):
                 return self.request(method, path, data, auth=auth, registrar=registrar,
-                                    timeout=timeout, _reintento=True)
+                                    timeout=timeout, params=params, _reintento=True)
 
         if resp.status_code >= 400:
             datos = payload if isinstance(payload, dict) else {}

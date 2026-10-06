@@ -3,8 +3,8 @@
 App de escritorio en Python (Tkinter + ttk) para la librería en línea: cliente de los 6 microservicios del
 proyecto (login, books, users, authors, pedidos y pagos), que corren en la VM.
 
-> **Parte 1 (ambiente base):** login y Libros funcionan completos; Autores, Usuarios, Pedidos y Pagos muestran
-> "En construcción" (sus microservicios solo exponen `/health` y `/metrics` todavía).
+> **Estado:** login, Libros, Autores, Usuarios y Pedidos funcionan completos; Pagos muestra "En construcción"
+> (su microservicio solo expone `/health` y `/metrics` todavía).
 > Arquitectura general: [`docs/ARQUITECTURA.md`](../../docs/ARQUITECTURA.md).
 
 ## Características
@@ -18,6 +18,24 @@ proyecto (login, books, users, authors, pedidos y pagos), que corren en la VM.
   botón **Revisar ahora** y, al pasar el mouse, muestra db, redis, tiempo de respuesta y última revisión.
 - **Libros:** tabla con crear (POST), editar (PUT), editar parcial (PATCH), eliminar (DELETE) y buscar.
   Las escrituras requieren **rol admin**: con otro rol el servicio responde 403 y la app lo explica.
+- **Autores** (microservicio authors): tabla con búsqueda y paginación y, al lado, los libros del autor
+  seleccionado. El admin además crea, edita y elimina autores, busca libros por ISBN o título para relacionarlos y
+  quita relaciones; para el cliente esas acciones no aparecen.
+- **Libros → detalle:** al seleccionar un libro, la franja bajo la tabla muestra sus datos y sus autores según el
+  servicio de autores.
+- **Pedidos** (microservicio pedidos), tipo carrito y seguimiento:
+  - *Comprar:* catálogo con el stock disponible, carrito con cantidades editables y total, y "Mis pedidos" con el
+    estado en color (pendiente amarillo, pagado verde, enviado azul, entregado gris, cancelado y expirado rojo),
+    el detalle de líneas e historial, y botones para editar, cancelar e "Ir a pagar" (deshabilitado hasta Pagos).
+  - *Gestión* (admin): todos los pedidos con filtros; marcar enviado o entregado, cancelar y eliminar.
+  - *Inventario* (admin): cargar, cambiar y quitar stock por libro.
+- **Usuarios** (microservicio users):
+  - *Admin:* panel de administración con búsqueda, filtros por rol y estado, paginación, alta y edición, y acciones
+    sobre el usuario seleccionado: cambiar rol, restablecer contraseña, cambiar correo y desactivar/reactivar
+    (con confirmación antes de las destructivas).
+  - *Cliente:* solo "Mi perfil": editar su nombre, cambiar su contraseña (pidiendo la actual) y cambiar su correo.
+  - Si el semáforo de Usuarios está en rojo la pantalla se deshabilita con un aviso y se reactiva sola al volver.
+  - Cambiar tu propia contraseña, correo o rol cierra tus sesiones: la app te regresa al login y te explica por qué.
 - **Configuración** (se guarda en `config.json`, sin tokens, y se aplica sin reiniciar):
   - IP de la VM y puerto de cada servicio.
   - Protocolo **HTTP (por defecto)** → `http://<IP>:<puerto>`, o **HTTPS** → `https://<IP>/api/<servicio>`.
@@ -44,11 +62,15 @@ Python_app/
 ├── screens/
 │   ├── login_screen.py  register_screen.py  home_screen.py
 │   ├── catalog_screen.py  book_form.py
+│   ├── authors_screen.py         # Autores y sus libros
+│   ├── users_screen.py           # Usuarios: administración (admin) / Mi perfil (cliente)
+│   ├── pedidos_screen.py         # Pedidos: comprar, gestión e inventario
 │   ├── config_screen.py
 │   └── placeholder_screen.py     # "En construcción"
 ├── widgets/
 │   ├── theme.py            # paleta, tipografía y estilos ttk
 │   ├── semaforos.py  sidebar.py  tooltip.py
+│   ├── dialogs.py          # formulario modal genérico
 ├── config/
 │   └── settings.py         # config.json: carga, validación, URL de cada servicio
 └── tests/

@@ -13,12 +13,14 @@ from pathlib import Path
 
 os.environ["JWT_SECRET_KEY"] = "secreto-de-pruebas-con-mas-de-32-bytes-0123456789"
 os.environ["SECRET_KEY"] = "cookie-de-pruebas"
+os.environ["INTERNAL_API_KEY"] = "clave-interna-de-pruebas"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # apps/services/login
 
 import bcrypt  # noqa: E402
 import fakeredis  # noqa: E402
 import pytest  # noqa: E402
 import redis  # noqa: E402
+from psycopg2 import errors as pg_errors  # noqa: E402
 
 import app as app_module  # noqa: E402
 import routes  # noqa: E402
@@ -37,6 +39,7 @@ class FakeDB:
     """Sustituye a PostgreSQL: solo entiende las consultas de login, refresh y health."""
 
     def __init__(self):
+        self.tokens = []          # (id_usuario, token_hash) insertados en tokens_confirmacion
         self.usuarios = {
             "admin@correo.com": _usuario(1, "admin@correo.com", 1),
             "ana@correo.com": _usuario(31, "ana@correo.com", 2),
@@ -75,6 +78,10 @@ class _Cursor:
         elif "WHERE correo = %s" in sql:
             usuario = self._db.usuarios.get(params[0])
             self._fila = tuple(usuario) + (_HASH,) if usuario else None
+        elif "INSERT INTO tokens_confirmacion" in sql:
+            if self._db.por_id(params[0]) is None:
+                raise pg_errors.ForeignKeyViolation()
+            self._db.tokens.append((params[0], params[1]))
         elif "WHERE id_usuario = %s" in sql:
             usuario = self._db.por_id(params[0])
             self._fila = tuple(usuario) if usuario and usuario[6] and usuario[7] == "confirmado" else None

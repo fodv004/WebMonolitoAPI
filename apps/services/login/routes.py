@@ -9,6 +9,8 @@ Endpoints del microservicio de autenticacion:
   GET  /session    consultar la sesion actual
   GET  /confirm    confirmar la cuenta con el token del correo
   GET  /confirmed  pagina que confirma visualmente que la cuenta quedo activada
+  POST /internal/confirmation   (X-Internal-Key) envia el correo de confirmacion a
+                                una cuenta; lo usa users al cambiar un correo
 
 GET /health y GET /metrics los registra app.py con el modulo comun.
 Si Redis no esta disponible, /login, /refresh y /logout responden 503.
@@ -18,11 +20,11 @@ Los docstrings (YAML tras '---') alimentan Swagger UI en /apidocs/.
 import logging
 
 from psycopg2 import errors as pg_errors
-from flask import Blueprint, redirect, render_template, request, session, url_for
+from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
 from config import Config  # primero: agrega apps/services al path (modulo `common`)
 import sessions
-from common.auth import ADMIN_ROLE_ID, ROLES
+from common.auth import ADMIN_ROLE_ID, ROLES, require_internal_key
 from common.redis_client import get_client
 from db import get_conn
 from mailer import MailError, send_confirmation_email
@@ -311,6 +313,44 @@ def confirmed():
     if estado not in _CONFIRM_RESULTADOS:
         estado = "invalid"
     return render_template("confirmed.html", estado=estado), (200 if estado in ("ok", "already") else 400)
+
+
+# ============================================================
+# POST /internal/confirmation   (solo entre microservicios)
+# ============================================================
+@bp.post("/internal/confirmation")
+@require_internal_key
+def internal_confirmation():
+    # Sin YAML de Swagger: no es un endpoint publico. El microservicio users lo llama
+    # cuando cambia el correo de una cuenta (ya la dejo en 'pendiente'): aqui se crea el
+    # token en tokens_confirmacion (tabla de este servicio) y se envia el mismo correo
+    # del registro. GET /confirm la regresa a 'confirmado'.
+    # El correo y el nombre vienen en el cuerpo porque users aun no hace COMMIT.
+    data = request.get_json(silent=True)
+    data = data if isinstance(data, dict) else {}
+    user_id, email, nombre = data.get("user_id"), data.get("email"), data.get("nombre")
+    if not isinstance(user_id, int) or isinstance(user_id, bool) or not isinstance(email, str) or not email.strip():
+        raise ApiError(400, "VALIDACION", "Se requieren user_id (entero) y email.")
+
+    token = new_token()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO tokens_confirmacion (id_usuario, token_hash, expira_en)
+                    VALUES (%s, %s, NOW() + %s * INTERVAL '1 hour')
+                    """,
+                    (user_id, token_digest(token), Config.CONFIRM_TOKEN_HOURS),
+                )
+            send_confirmation_email(email.strip().lower(), nombre if isinstance(nombre, str) else "", token)
+    except pg_errors.ForeignKeyViolation:
+        raise ApiError(404, "USUARIO_NO_ENCONTRADO", "No existe el usuario indicado.")
+    except MailError:
+        log.exception("No se pudo enviar el correo de confirmacion")
+        raise ApiError(503, "CORREO_NO_ENVIADO", "No se pudo enviar el correo de confirmacion.")
+    return jsonify({"status": "ok", "code": "CORREO_ENVIADO",
+                    "message": "Correo de confirmacion enviado."}), 202
 
 
 # ============================================================

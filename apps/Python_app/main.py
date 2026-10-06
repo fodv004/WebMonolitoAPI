@@ -28,12 +28,15 @@ from api.pagos_client import PagosClient
 from api.pedidos_client import PedidosClient
 from api.users_client import UsersClient
 from config.settings import AppConfig
+from screens.authors_screen import AuthorsScreen
 from screens.catalog_screen import CatalogScreen
 from screens.config_screen import ConfigScreen
 from screens.home_screen import HomeScreen
 from screens.login_screen import LoginScreen
+from screens.pedidos_screen import PedidosScreen
 from screens.placeholder_screen import PlaceholderScreen
 from screens.register_screen import RegisterScreen
+from screens.users_screen import UsersScreen
 from session import Session
 from utils import run_async
 from widgets import theme
@@ -90,9 +93,9 @@ class App(tk.Tk):
             "config": ConfigScreen(contenedor, self),
             "home": HomeScreen(contenedor, self),
             "catalog": CatalogScreen(contenedor, self),
-            "authors": PlaceholderScreen(contenedor, self, "authors", "Autores y sus relaciones con libros"),
-            "users": PlaceholderScreen(contenedor, self, "users", "Usuarios, roles, correos y contraseñas"),
-            "pedidos": PlaceholderScreen(contenedor, self, "pedidos", "Pedidos, líneas de pedido, stock y estados"),
+            "authors": AuthorsScreen(contenedor, self),
+            "users": UsersScreen(contenedor, self),
+            "pedidos": PedidosScreen(contenedor, self),
             "pagos": PlaceholderScreen(contenedor, self, "pagos", "Pagos y estado de los pedidos"),
         }
         for pantalla in self._pantallas.values():
@@ -156,6 +159,19 @@ class App(tk.Tk):
         self._cancelar_renovacion()
         self.sesion.limpiar()
         self._actualizar_sesion_visible()
+
+    def actualizar_usuario(self, usuario):
+        """Refresca los datos visibles del usuario en sesion (p. ej. tras editar su nombre)."""
+        self.sesion.usuario = {**(self.sesion.usuario or {}), **usuario}
+        self._actualizar_sesion_visible()
+
+    def terminar_sesion(self, motivo):
+        """El servidor ya cerro las sesiones del usuario (cambio su contraseña, su correo o su
+        rol): limpia la sesion local y regresa al login explicando por que."""
+        self._limpiar_sesion()
+        self.set_estado(motivo, "ok")
+        self.mostrar("login")
+        messagebox.showinfo("Inicia sesión de nuevo", motivo, parent=self)
 
     def sesion_invalida(self, error):
         """401 que no se pudo resolver renovando el token: avisa, limpia la sesion y vuelve al login."""

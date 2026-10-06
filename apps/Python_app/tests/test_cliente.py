@@ -274,3 +274,181 @@ def test_semaforo_verde_solo_con_200_y_status_ok(monkeypatch, config):
 def test_semaforo_rojo_en_cualquier_otro_caso(monkeypatch, config, respuesta):
     _Health(monkeypatch, respuesta)
     assert health.revisar(config, "users", 3)["ok"] is False
+
+
+# ------------------------------------------------------------------ cliente de users
+def test_users_list_envia_filtros_y_paginacion(servidor, config):
+    from api.users_client import UsersClient
+
+    users = UsersClient(config, _sesion_iniciada(config))
+    servidor.cola += [_respuesta(200, {"items": [], "page": 2, "per_page": 15, "total": 0, "pages": 0})] * 2
+    users.list(q="ana", role_id=2, activo=False, page=2, per_page=15)
+    users.list()
+
+    con_filtros, sin_filtros = (prep.url for prep, _ in servidor.recibidas)
+    assert con_filtros.startswith("http://34.51.58.130:5002/users?")
+    for parte in ("q=ana", "role_id=2", "activo=false", "page=2", "per_page=15", "format=json"):
+        assert parte in con_filtros
+    assert "q=" not in sin_filtros and "role_id" not in sin_filtros and "activo" not in sin_filtros
+
+
+def test_users_rutas_y_cuerpos(servidor, config):
+    from api.users_client import UsersClient
+
+    users = UsersClient(config, _sesion_iniciada(config))
+    servidor.cola += [_respuesta(200, {})] * 9
+    users.me()
+    users.create(nombre="Ana", email="ana@correo.com", password="ClaveNueva123", role_id=2)
+    users.update(31, nombre="Ana")
+    users.patch(31, activo=True)
+    users.deactivate(31)
+    users.change_password(31, "Nueva12345", "Actual12345")
+    users.change_password(32, "Nueva12345")
+    users.change_email(31, "nueva@correo.com")
+    users.change_role(31, 1)
+
+    vistas = [(prep.method, prep.url.split("?")[0].split(":5002")[1], json.loads(prep.body) if prep.body else None)
+              for prep, _ in servidor.recibidas]
+    assert vistas == [
+        ("GET", "/users/me", None),
+        ("POST", "/users", {"nombre": "Ana", "email": "ana@correo.com", "password": "ClaveNueva123", "role_id": 2}),
+        ("PUT", "/users/31", {"nombre": "Ana"}),
+        ("PATCH", "/users/31", {"activo": True}),
+        ("DELETE", "/users/31", None),
+        ("PATCH", "/users/31/password", {"password_nueva": "Nueva12345", "password_actual": "Actual12345"}),
+        ("PATCH", "/users/32/password", {"password_nueva": "Nueva12345"}),      # el admin no envia la actual
+        ("PATCH", "/users/31/email", {"email": "nueva@correo.com"}),
+        ("PATCH", "/users/31/role", {"role_id": 1}),
+    ]
+    assert all(prep.headers["Authorization"] == "Bearer jwt-viejo" for prep, _ in servidor.recibidas)
+
+
+def test_el_log_oculta_las_contraseñas_al_cambiarlas(servidor, config, capsys):
+    from api.users_client import UsersClient
+
+    servidor.cola.append(_respuesta(200, {"status": "ok"}))
+    UsersClient(config, _sesion_iniciada(config)).change_password(31, "NUEVA-SECRETA-1", "ACTUAL-SECRETA-1")
+    consola = capsys.readouterr().out
+    assert "NUEVA-SECRETA-1" not in consola and "ACTUAL-SECRETA-1" not in consola
+    assert "PATCH http://34.51.58.130:5002/users/31/password" in consola
+
+
+# ------------------------------------------------------------------ cliente de authors
+def test_authors_rutas_filtros_y_cuerpos(servidor, config):
+    from api.authors_client import AuthorsClient
+
+    authors = AuthorsClient(config, _sesion_iniciada(config))
+    servidor.cola += [_respuesta(200, {})] * 11
+    authors.list(q="borges", nacionalidad="Argentina", page=2, per_page=15)
+    authors.list()
+    authors.get(3)
+    authors.books(3)
+    authors.by_book("978-0000000001")
+    authors.create(nombre="Juan", apellido="Rulfo")
+    authors.update(3, nombre="Jorge Luis")
+    authors.delete(3)
+    authors.delete(3, force=True)
+    authors.add_book(3, "9780000000003")
+    authors.add_book(3, "9780000000003", orden=2)
+
+    vistas = [(prep.method, prep.url.split(":5003")[1], json.loads(prep.body) if prep.body else None)
+              for prep, _ in servidor.recibidas]
+    lista = vistas[0][1]
+    assert lista.startswith("/authors?") and all(p in lista for p in ("q=borges", "nacionalidad=Argentina", "page=2", "per_page=15"))
+    assert "q=" not in vistas[1][1] and "nacionalidad" not in vistas[1][1]
+    assert vistas[2:] == [
+        ("GET", "/authors/3?format=json", None),
+        ("GET", "/authors/3/books?format=json", None),
+        ("GET", "/authors/by-book/978-0000000001?format=json", None),
+        ("POST", "/authors?format=json", {"nombre": "Juan", "apellido": "Rulfo"}),
+        ("PUT", "/authors/3?format=json", {"nombre": "Jorge Luis"}),
+        ("DELETE", "/authors/3?format=json", None),
+        ("DELETE", "/authors/3?format=json&force=true", None),
+        ("POST", "/authors/3/books?format=json", {"isbn": "9780000000003"}),
+        ("POST", "/authors/3/books?format=json", {"isbn": "9780000000003", "orden": 2}),
+    ]
+
+
+def test_authors_quitar_relacion_y_error_de_isbn_inexistente(servidor, config):
+    from api.authors_client import AuthorsClient
+
+    authors = AuthorsClient(config, _sesion_iniciada(config))
+    servidor.cola += [_respuesta(200, {}), _respuesta(404, {"error": "LIBRO_NO_ENCONTRADO",
+                                                             "message": "No existe un libro con ISBN 999 en el catalogo."}),
+                      _respuesta(503, {"error": "BOOKS_NO_DISPONIBLE", "message": "El servicio de libros no responde."})]
+    authors.remove_book(3, "9780000000003")
+    assert servidor.recibidas[0][0].method == "DELETE" and "/authors/3/books/9780000000003" in servidor.recibidas[0][0].url
+    with pytest.raises(ApiError) as error:
+        authors.add_book(3, "999")
+    assert error.value.status == 404 and error.value.code == "LIBRO_NO_ENCONTRADO" and "999" in error.value.mensaje
+    with pytest.raises(ApiError) as error:
+        authors.add_book(3, "9780000000003")
+    assert error.value.status == 503 and "no está disponible" in error.value.mensaje
+
+
+# ------------------------------------------------------------------ cliente de pedidos
+def test_pedidos_rutas_y_cuerpos(servidor, config):
+    from api.pedidos_client import PedidosClient
+
+    pedidos = PedidosClient(config, _sesion_iniciada(config))
+    servidor.cola += [_respuesta(200, {"items": [{"isbn": "1", "stock_disponible": 5}]})] + [_respuesta(200, {})] * 11
+    assert pedidos.inventory() == [{"isbn": "1", "stock_disponible": 5}]
+    pedidos.create({"9780000000001": 2, "9780000000003": 1})
+    pedidos.list(estado="PAGADO", user_id=31, per_page=50)
+    pedidos.get(7)
+    pedidos.replace_lines(7, {"9780000000001": 4})
+    pedidos.patch_lines(7, {"9780000000003": 0})
+    pedidos.cancel(7)
+    pedidos.set_state(7, "ENVIADO")
+    pedidos.delete(7)
+    pedidos.inventory_add("9780000000004", 10)
+    pedidos.inventory_set("9780000000004", 3)
+    pedidos.inventory_remove("9780000000004")
+
+    vistas = [(prep.method, prep.url.split(":5004")[1].split("?")[0], json.loads(prep.body) if prep.body else None)
+              for prep, _ in servidor.recibidas]
+    assert vistas == [
+        ("GET", "/inventario", None),
+        ("POST", "/pedidos", {"lineas": [{"isbn": "9780000000001", "cantidad": 2}, {"isbn": "9780000000003", "cantidad": 1}]}),
+        ("GET", "/pedidos", None),
+        ("GET", "/pedidos/7", None),
+        ("PUT", "/pedidos/7", {"lineas": [{"isbn": "9780000000001", "cantidad": 4}]}),
+        ("PATCH", "/pedidos/7/lineas", {"lineas": [{"isbn": "9780000000003", "cantidad": 0}]}),
+        ("PATCH", "/pedidos/7/cancelar", {}),
+        ("PATCH", "/pedidos/7/estado", {"estado": "ENVIADO"}),
+        ("DELETE", "/pedidos/7", None),
+        ("POST", "/inventario", {"isbn": "9780000000004", "stock_disponible": 10}),
+        ("PUT", "/inventario/9780000000004", {"stock_disponible": 3}),
+        ("DELETE", "/inventario/9780000000004", None),
+    ]
+    assert "Authorization" not in servidor.recibidas[0][0].headers          # el inventario se consulta sin token
+    assert all(p in servidor.recibidas[2][0].url for p in ("estado=PAGADO", "user_id=31", "per_page=50"))
+
+
+def test_pedidos_falta_de_stock_es_un_conflicto_que_no_cierra_la_sesion(servidor, config):
+    from api.pedidos_client import PedidosClient
+
+    sesion = _sesion_iniciada(config)
+    servidor.cola.append(_respuesta(409, {"error": "STOCK_INSUFICIENTE", "message":
+                                           "Stock insuficiente para el ISBN 9780000000003: disponible 1, solicitado 5."}))
+    with pytest.raises(ApiError) as error:
+        PedidosClient(config, sesion).create({"9780000000003": 5})
+    assert error.value.status == 409 and error.value.code == "STOCK_INSUFICIENTE"
+    assert "9780000000003" in error.value.mensaje and sesion.activa
+
+
+def test_texto_del_pedido_muestra_lineas_vencimiento_e_historial():
+    from screens.pedidos_screen import COLORES_ESTADO, ESTADOS, texto_del_pedido
+
+    pedido = {"id": 7, "user_id": 31, "estado": "PENDIENTE_PAGO", "total": 850.5, "expira_en": "2026-10-06T12:15:00",
+              "lineas": [{"isbn": "9780000000001", "titulo": "Cien años de soledad", "cantidad": 2,
+                          "precio_unitario": 300.0, "subtotal": 600.0}],
+              "historial": [{"estado_anterior": None, "estado_nuevo": "PENDIENTE_PAGO", "actor": "user:31",
+                             "fecha": "2026-10-06T12:00:00"}]}
+    texto = texto_del_pedido(pedido)
+    for parte in ("Pedido #7", "2 × Cien años de soledad", "$600.00", "TOTAL: $850.50", "vence: 2026-10-06 12:15",
+                  "creado → PENDIENTE_PAGO  (user:31)"):
+        assert parte in texto
+    assert "vence" not in texto_del_pedido({**pedido, "estado": "PAGADO"})
+    assert set(COLORES_ESTADO) == set(ESTADOS)                              # cada estado tiene su color
+    assert COLORES_ESTADO["CANCELADO"] == COLORES_ESTADO["EXPIRADO"]

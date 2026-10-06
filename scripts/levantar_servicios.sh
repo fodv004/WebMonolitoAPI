@@ -7,8 +7,7 @@
 #   1. Crea el .venv de cada servicio e instala sus dependencias.
 #   2. Verifica que cada servicio tenga su .env (lo crea desde
 #      .env.example y se detiene para que lo completes).
-#   3. Ejecuta las migraciones apps/services/*/sql/NNN_*.sql y crea o
-#      actualiza el usuario admin inicial.
+#   3. Ejecuta las migraciones apps/services/*/sql/NNN_*.sql.
 #   4. Instala, activa y reinicia las 6 unidades systemd.
 #
 # Uso (en la VM, desde cualquier carpeta; pide sudo solo para systemd):
@@ -19,7 +18,10 @@
 #   RUN_USER=usuario               usuario de las unidades (default: el actual)
 #   MIGRATION_DATABASE_URL=...     conexion del DUEÑO de la BD para migrar
 #                                  (default: DATABASE_URL de users/.env)
-#   SKIP_MIGRATIONS=1              no ejecutar migraciones ni seed del admin
+#   SKIP_MIGRATIONS=1              no ejecutar migraciones
+#
+# El administrador inicial NO se toca aqui: se prepara una sola vez con
+#   (cd apps/services/users && .venv/bin/python scripts/crear_admin.py)
 # ============================================================
 set -euo pipefail
 
@@ -100,12 +102,6 @@ else
         psql "$db_url" -v ON_ERROR_STOP=1 --quiet -f "$archivo"
     done
     shopt -u nullglob
-
-    if [ -n "$(valor_env "$SERVICES_DIR/users/.env" ADMIN_EMAIL)" ]; then
-        (cd "$SERVICES_DIR/users" && .venv/bin/python scripts/seed_admin.py)
-    else
-        echo "AVISO: ADMIN_EMAIL vacio en users/.env: no se creo el usuario admin inicial."
-    fi
 fi
 
 # ------------------------------------------------------------ 4. systemd

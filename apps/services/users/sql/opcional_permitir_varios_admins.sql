@@ -1,0 +1,24 @@
+-- ============================================================
+-- sql/opcional_permitir_varios_admins.sql
+-- OPCIONAL. NO lo ejecuta scripts/levantar_servicios.sh (no tiene
+-- prefijo numérico): solo córrelo si DECIDES que el sistema pueda tener
+-- más de un administrador.
+--
+-- El esquema del monolito (WebMonolito/db/01_schema.sql) trae esta regla:
+--
+--     -- Regla de negocio: como máximo un administrador en todo el sistema.
+--     CREATE UNIQUE INDEX un_solo_admin ON usuarios (es_admin) WHERE es_admin = TRUE;
+--
+-- Mientras ese índice exista, el microservicio users la respeta: crear un
+-- segundo admin o cambiarle el rol a alguien a admin responde
+-- 409 UN_SOLO_ADMIN. Este script elimina SOLO ese índice (no toca datos ni
+-- columnas) para que PATCH /users/{id}/role y POST /users puedan nombrar
+-- más administradores. El monolito sigue funcionando igual.
+--
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f opcional_permitir_varios_admins.sql
+--
+-- Para volver a la regla original (solo si queda un único admin):
+--   CREATE UNIQUE INDEX un_solo_admin ON usuarios (es_admin) WHERE es_admin = TRUE;
+-- ============================================================
+
+DROP INDEX IF EXISTS un_solo_admin;

@@ -1,7 +1,7 @@
 def test_health(client, fake_redis):
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.get_json() == {"service": "pedidos", "status": "ok", "db": "ok", "redis": "ok", "version": "0.1.0"}
+    assert resp.get_json() == {"service": "pedidos", "status": "ok", "db": "ok", "redis": "ok", "version": "1.0.0"}
 
 
 def test_health_503_si_la_base_no_responde(client, fake_redis, monkeypatch):
@@ -22,6 +22,6 @@ def test_metrics(client, fake_redis):
             "cache_hits", "cache_misses", "redis_errors"} <= set(datos)
 
 
-def test_sin_endpoints_de_negocio(client, fake_redis):
-    resp = client.get("/pedidos")
+def test_ruta_inexistente_404_con_formato_uniforme(client, fake_redis):
+    resp = client.get("/no-existe")
     assert resp.status_code == 404 and set(resp.get_json()) == {"error", "message"}

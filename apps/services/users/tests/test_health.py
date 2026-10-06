@@ -22,6 +22,6 @@ def test_metrics(client, fake_redis):
             "cache_hits", "cache_misses", "redis_errors"} <= set(datos)
 
 
-def test_sin_endpoints_de_negocio(client, fake_redis):
-    resp = client.get("/users")
+def test_ruta_inexistente_404_con_formato_uniforme(client, fake_redis):
+    resp = client.get("/no-existe")
     assert resp.status_code == 404 and set(resp.get_json()) == {"error", "message"}

@@ -8,6 +8,7 @@ from flask import Flask, jsonify
 
 from common import redis_keys
 from common.auth import require_auth
+import routes
 from config import Config
 from security import token_digest
 
@@ -99,6 +100,10 @@ def test_refresh_rota_el_refresh_token(client, login, fake_redis):
     assert json.loads(fake_redis.get(redis_keys.session(antes["sid"])))["jti"] == despues["jti"]
     assert not fake_redis.exists(redis_keys.refresh(token_digest(inicial["refresh_token"])))
     assert fake_redis.exists(redis_keys.refresh(token_digest(nuevo["refresh_token"])))
+
+    # el JWT anterior queda revocado: la sesion nunca tiene dos tokens vivos
+    assert fake_redis.exists(redis_keys.jwt_revoked(antes["jti"]))
+    assert not fake_redis.exists(redis_keys.jwt_revoked(despues["jti"]))
 
     # un refresh token es de un solo uso
     reuso = client.post("/refresh?format=json", json={"refresh_token": inicial["refresh_token"]})
@@ -198,3 +203,47 @@ def test_health_y_metrics(client, fake_redis):
 def test_health_con_redis_caido_503(client, redis_caido):
     resp = client.get("/health")
     assert resp.status_code == 503 and resp.get_json()["redis"] == "error"
+
+
+# ------------------------------------------------------------------ confirmacion para users
+INTERNA = {"X-Internal-Key": "clave-interna-de-pruebas"}
+
+
+@pytest.fixture
+def correos(monkeypatch):
+    enviados = []
+    monkeypatch.setattr(routes, "send_confirmation_email", lambda *args: enviados.append(args))
+    return enviados
+
+
+def test_confirmacion_interna_crea_token_y_envia_correo(client, db, correos):
+    resp = client.post("/internal/confirmation", headers=INTERNA,
+                       json={"user_id": 31, "email": "Nueva@Correo.com", "nombre": "Ana"})
+    assert resp.status_code == 202 and resp.get_json()["code"] == "CORREO_ENVIADO"
+    destinatario, nombre, token = correos[0]
+    assert destinatario == "nueva@correo.com" and nombre == "Ana"
+    assert db.tokens == [(31, token_digest(token))]         # en la base solo vive el hash
+
+
+def test_confirmacion_interna_exige_la_clave(client, db, correos):
+    cuerpo = {"user_id": 31, "email": "nueva@correo.com"}
+    assert client.post("/internal/confirmation", json=cuerpo).status_code == 401
+    assert client.post("/internal/confirmation", json=cuerpo, headers={"X-Internal-Key": "otra"}).status_code == 401
+    assert correos == [] and db.tokens == []
+
+
+def test_confirmacion_interna_valida_y_404(client, db, correos):
+    assert client.post("/internal/confirmation?format=json", headers=INTERNA, json={"email": "a@b.c"}).status_code == 400
+    resp = client.post("/internal/confirmation?format=json", headers=INTERNA,
+                       json={"user_id": 999, "email": "a@b.c"})
+    assert resp.status_code == 404 and correos == []
+
+
+def test_confirmacion_interna_503_si_el_correo_no_sale(client, db, monkeypatch):
+    def falla(*args):
+        raise routes.MailError("smtp caido")
+
+    monkeypatch.setattr(routes, "send_confirmation_email", falla)
+    resp = client.post("/internal/confirmation?format=json", headers=INTERNA,
+                       json={"user_id": 31, "email": "nueva@correo.com"})
+    assert resp.status_code == 503 and resp.get_json()["code"] == "CORREO_NO_ENVIADO"

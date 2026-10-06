@@ -425,3 +425,654 @@ sudo systemctl restart users                             # reiniciar uno
 sudo journalctl -u login -f                              # ver su log en vivo (sin tokens ni contraseñas)
 curl -s http://127.0.0.1:5000/metrics                    # métricas de un servicio
 ```
+
+
+---
+---
+
+# PARTE 2 — Microservicio users
+
+Requisito: la Parte 1 funcionando (los 6 servicios en verde). Corre los bloques en orden y pega la salida en cada
+**Resultado**.
+
+## 10. Desplegar la Parte 2
+
+### 10.1 Código nuevo y esquema actual de `usuarios`
+
+```bash
+cd ~/WebMonolitoAPI && export REPO="$(pwd)"       # ajusta la ruta
+git pull && git log --oneline -3
+DB_URL="$(grep '^DATABASE_URL=' apps/services/users/.env | cut -d= -f2-)"
+psql "$DB_URL" -c '\d usuarios'                                   # columnas ANTES de la migración 002
+psql "$DB_URL" -c '\di un_solo_admin'                             # ¿existe la regla "un solo administrador"?
+psql "$DB_URL" -c "SELECT id_usuario, correo, es_admin, role_id, activo, estado_cuenta, left(password_hash, 4) AS hash FROM usuarios WHERE es_admin OR role_id = 1 OR correo IN ('admin@libreria.com', 'maruchanvalo@gmail.com') ORDER BY 1;"
+```
+
+**Resultado:**
+
+```
+```
+
+### 10.2 Variables del administrador en el `.env` de users
+
+```bash
+poner() { if grep -q "^$2=" "$1"; then sed -i "s|^$2=.*|$2=$3|" "$1"; else printf '%s=%s\n' "$2" "$3" >> "$1"; fi; }
+poner apps/services/users/.env ADMIN_EMAIL admin@libreria.com
+read -r -s -p "Contraseña para admin@libreria.com (mínimo 8 caracteres): " ADMIN_PASS; echo
+poner apps/services/users/.env ADMIN_PASSWORD "$ADMIN_PASS"; unset ADMIN_PASS
+grep -q '^LOGIN_URL=' apps/services/users/.env || echo 'LOGIN_URL=http://127.0.0.1:5000' >> apps/services/users/.env
+grep -oE '^(ADMIN_EMAIL=.*|ADMIN_PASSWORD|LOGIN_URL=.*|INTERNAL_API_KEY)' apps/services/users/.env   # sin mostrar secretos
+```
+
+`ADMIN_PASSWORD` solo se usa si el `password_hash` del admin sigue siendo el valor de ejemplo del monolito.
+`INTERNAL_API_KEY` debe ser la misma en users y login (ya quedó así en la Parte 1).
+
+**Resultado:**
+
+```
+```
+
+### 10.3 Dependencias nuevas, migración `002_users.sql` y reinicio
+
+```bash
+cd "$REPO"
+bash scripts/levantar_servicios.sh         # instala email-validator y dnspython en users, migra y reinicia los 6
+psql "$DB_URL" -c '\d usuarios'            # ahora con updated_at y el trigger trg_usuarios_rol_y_fecha
+psql "$DB_URL" -c "SELECT version, aplicada_en FROM schema_migraciones ORDER BY aplicada_en;"   # 003_roles y 004_users
+psql "$DB_URL" -c "SELECT role_id, es_admin, COUNT(*) FROM usuarios GROUP BY 1, 2 ORDER BY 1;"  # 1|t y 2|f, nunca mezclados
+```
+
+**Resultado:**
+
+```
+```
+
+### 10.4 Administrador inicial (una sola vez)
+
+```bash
+cd "$REPO/apps/services/users"
+.venv/bin/python scripts/crear_admin.py
+.venv/bin/python scripts/crear_admin.py     # segunda vez: debe decir "sin cambios" (es idempotente)
+cd "$REPO"
+```
+
+Consulta de verificación (admin@libreria.com → `role_id = 1`; maruchanvalo@gmail.com → `role_id = 2`):
+
+```bash
+psql "$DB_URL" -c "SELECT id_usuario, correo, es_admin, role_id, activo, estado_cuenta, left(password_hash, 4) AS hash FROM usuarios WHERE correo IN ('admin@libreria.com', 'maruchanvalo@gmail.com') ORDER BY role_id;"
+```
+
+`hash` debe empezar con `$2b$` (bcrypt). Si el de maruchanvalo no empieza así, esa cuenta no puede iniciar sesión
+hasta que el admin le restablezca la contraseña (11.5).
+
+**Resultado:**
+
+```
+```
+
+---
+
+## 11. Comprobación de la Parte 2
+
+Funciones de apoyo (misma terminal para todo el punto 11):
+
+```bash
+json() { python3 -c "import sys,json; d=json.load(sys.stdin); print(d$1)"; }
+claims() { python3 -c "import sys,base64,json; p=sys.argv[1].split('.')[1]; print(json.dumps(json.loads(base64.urlsafe_b64decode(p+'='*(-len(p)%4))), indent=1))" "$1"; }
+entrar() {   # entrar CORREO  -> deja el JWT en $TOKEN (pide la contraseña sin mostrarla)
+    local pass r; read -r -s -p "Contraseña de $1: " pass; echo
+    r="$(curl -s -X POST 'http://127.0.0.1:5000/login?format=json' -H 'Content-Type: application/json' \
+          -d "{\"email\":\"$1\",\"password\":\"$pass\"}")"
+    echo "$r" | json '["code"]'
+    TOKEN="$(echo "$r" | json '["data"]["token"]' 2>/dev/null)"
+}
+U=http://127.0.0.1:5002
+```
+
+### 11.1 Login con admin@libreria.com → el JWT trae `role_id = 1`
+
+```bash
+entrar admin@libreria.com; ADMIN_TOKEN="$TOKEN"
+claims "$ADMIN_TOKEN" | grep -E '"(user_id|role_id|role|type)"'
+curl -s "$U/users/me" -H "Authorization: Bearer $ADMIN_TOKEN"; echo
+curl -s "$U/roles" -H "Authorization: Bearer $ADMIN_TOKEN"; echo
+curl -s "$U/users?per_page=3" -H "Authorization: Bearer $ADMIN_TOKEN" | json '["total"]'
+```
+
+**Resultado (esperado: `LOGIN_EXITOSO`, `"role_id": 1`, `"role": "admin"`):**
+
+```
+```
+
+### 11.2 Login con maruchanvalo@gmail.com → `role_id = 2`; un cliente recibe 403 en `GET /users`
+
+```bash
+entrar maruchanvalo@gmail.com; CLIENTE_TOKEN="$TOKEN"
+claims "$CLIENTE_TOKEN" | grep -E '"(user_id|role_id|role)"'
+curl -s -w '\nGET /users como cliente -> %{http_code}\n' "$U/users" -H "Authorization: Bearer $CLIENTE_TOKEN"
+curl -s -w '\nGET /users/me como cliente -> %{http_code}\n' "$U/users/me" -H "Authorization: Bearer $CLIENTE_TOKEN"
+curl -s -o /dev/null -w 'GET /users sin token -> %{http_code}\n' "$U/users"
+```
+
+**Resultado (esperado: `"role_id": 2`, `{"error":"ROL_INSUFICIENTE",...}` con `403`, `200` y `401`):**
+
+```
+```
+
+### 11.3 Crear un usuario como admin y hacer login con él
+
+Usa un correo de un dominio real (se valida el registro MX), por ejemplo uno tuyo de Gmail con `+prueba`.
+
+```bash
+read -r -p "Correo del usuario nuevo: " NUEVO
+read -r -s -p "Contraseña del usuario nuevo (mínimo 8): " NUEVO_PASS; echo
+R="$(curl -s -X POST "$U/users" -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+      -d "{\"nombre\":\"Usuario\",\"apellido_paterno\":\"De Prueba\",\"email\":\"$NUEVO\",\"password\":\"$NUEVO_PASS\"}")"
+echo "$R"; NUEVO_ID="$(echo "$R" | json '["id_usuario"]')"; unset NUEVO_PASS
+curl -s -w '\nmismo correo otra vez -> %{http_code}\n' -X POST "$U/users" -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H 'Content-Type: application/json' -d "{\"nombre\":\"Otro\",\"email\":\"$NUEVO\",\"password\":\"OtraClave123\"}"
+
+entrar "$NUEVO"; NUEVO_TOKEN="$TOKEN"            # la contraseña que acabas de ponerle
+claims "$NUEVO_TOKEN" | grep -E '"(user_id|role_id)"'
+```
+
+**Resultado (esperado: usuario sin `password_hash`, `409 EMAIL_DUPLICADO`, `LOGIN_EXITOSO` y `"role_id": 2`):**
+
+```
+```
+
+### 11.4 Después de cambiarle la contraseña a un usuario, su token anterior recibe 401
+
+```bash
+curl -s -o /dev/null -w 'antes: GET /users/me con su token -> %{http_code}\n' "$U/users/me" -H "Authorization: Bearer $NUEVO_TOKEN"
+read -r -s -p "Contraseña nueva para $NUEVO: " P2; echo
+curl -s -X PATCH "$U/users/$NUEVO_ID/password" -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d "{\"password_nueva\":\"$P2\"}"; echo; unset P2
+curl -s -w '\ndespués: GET /users/me con el token anterior -> %{http_code}\n' "$U/users/me" -H "Authorization: Bearer $NUEVO_TOKEN"
+if command -v valkey-cli >/dev/null; then CLI=valkey-cli; else CLI=redis-cli; fi
+read -r -s -p "Contraseña de Redis: " REDISCLI_AUTH; export REDISCLI_AUTH; echo
+$CLI -h 127.0.0.1 --scan --pattern 'jwt:revoked:*'
+$CLI -h 127.0.0.1 smembers "user:sessions:$NUEVO_ID"          # vacío: sus sesiones se cerraron
+entrar "$NUEVO"                                               # con la contraseña NUEVA -> LOGIN_EXITOSO
+```
+
+**Resultado (esperado: `200`, mensaje de contraseña actualizada, `{"error":"TOKEN_REVOCADO",...}` con `401`, `LOGIN_EXITOSO`):**
+
+```
+```
+
+### 11.5 Reglas: último admin, un solo admin, rol, baja lógica y endpoint interno
+
+```bash
+ADMIN_ID="$(curl -s "$U/users/me" -H "Authorization: Bearer $ADMIN_TOKEN" | json '["id_usuario"]')"
+# El último admin no se desactiva ni pierde el rol -> 409 ULTIMO_ADMIN
+curl -s -w ' -> %{http_code}\n' -X DELETE "$U/users/$ADMIN_ID" -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -s -w ' -> %{http_code}\n' -X PATCH "$U/users/$ADMIN_ID/role" -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H 'Content-Type: application/json' -d '{"role_id":2}'
+# Nombrar un segundo admin -> 409 UN_SOLO_ADMIN mientras exista el índice del monolito (200 si lo quitaste)
+curl -s -w ' -> %{http_code}\n' -X PATCH "$U/users/$NUEVO_ID/role" -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H 'Content-Type: application/json' -d '{"role_id":1}'
+# Un cliente no cambia su propio rol -> 403
+curl -s -w ' -> %{http_code}\n' -X PATCH "$U/users/$NUEVO_ID" -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' -d '{"role_id":1}'
+# Baja lógica: el usuario sigue en la tabla con activo = false y ya no puede entrar
+curl -s -w ' -> %{http_code}\n' -X DELETE "$U/users/$NUEVO_ID" -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -s -o /dev/null -w 'su token tras la baja -> %{http_code}\n' "$U/users/me" -H "Authorization: Bearer $TOKEN"
+psql "$DB_URL" -c "SELECT id_usuario, correo, activo, role_id, es_admin, updated_at FROM usuarios WHERE id_usuario = $NUEVO_ID;"
+# Endpoint interno (para pedidos y pagos): sin clave 401, con clave 200
+curl -s -o /dev/null -w 'interno sin clave -> %{http_code}\n' "$U/users/internal/$ADMIN_ID"
+KEY="$(grep '^INTERNAL_API_KEY=' apps/services/users/.env | cut -d= -f2-)"
+curl -s "$U/users/internal/$ADMIN_ID" -H "X-Internal-Key: $KEY"; echo; unset KEY
+```
+
+**Resultado (esperado: `409`, `409`, `409` (o `200`), `403`, `200`, `401`, fila con `activo = f`, `401` y los datos mínimos):**
+
+```
+```
+
+### 11.6 (Opcional) Cambio de correo con confirmación
+
+Requiere que el correo de login funcione (Mailpit o Gmail). Con una cuenta de prueba **activa**:
+
+```bash
+curl -s -w ' -> %{http_code}\n' -X PATCH "$U/users/<ID>/email" -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H 'Content-Type: application/json' -d '{"email":"<correo nuevo real>"}'
+psql "$DB_URL" -c "SELECT correo, estado_cuenta FROM usuarios WHERE id_usuario = <ID>;"      # pendiente
+sudo journalctl -u login -n 5 --no-pager | grep 'internal/confirmation'                     # POST ... 202
+```
+
+Al abrir el enlace del correo, `estado_cuenta` vuelve a `confirmado`.
+
+**Resultado:**
+
+```
+```
+
+### 11.7 App Tk
+
+En tu máquina: `cd apps/Python_app && python main.py`.
+
+1. **Admin:** inicia sesión con `admin@libreria.com`. La barra superior debe decir `(admin)`. Abre **Usuarios**:
+   se ve *Administración de usuarios* con la tabla, los filtros y el panel de acciones a la derecha.
+2. Escribe parte de un correo en *Buscar* y pulsa Enter; filtra por *Rol* y por *Estado*; usa *Anterior / Siguiente*.
+3. **+ Nuevo usuario** → llena el formulario → *Crear*. Debe aparecer en la tabla y la barra inferior decir `201 Usuario creado`.
+4. Selecciónalo y prueba **Editar datos**, **Restablecer contraseña**, **Cambiar rol** (pide confirmación; con el
+   índice `un_solo_admin` debe explicar que solo se admite un administrador) y **Desactivar** (pide confirmación; el
+   botón cambia a *Reactivar*).
+5. Selecciona tu propia cuenta de admin y pulsa **Desactivar**: debe negarse (último administrador).
+6. En la VM: `sudo systemctl stop users`. En ≤ 10 s el semáforo de Usuarios pasa a rojo y la pantalla se cubre con
+   *Servicio de usuarios no disponible*. `sudo systemctl start users`: vuelve a verde y la pantalla se habilita sola.
+7. **Cliente:** cierra sesión y entra con `maruchanvalo@gmail.com`. En **Usuarios** solo debe verse *Mi perfil*.
+   Cambia el nombre y pulsa *Guardar mi nombre*; luego **Cambiar contraseña**: con la actual incorrecta muestra el
+   error dentro del diálogo; con la correcta te regresa al login pidiéndote entrar con la nueva.
+
+**Resultado (qué viste en cada paso):**
+
+```
+```
+
+### 11.8 Pytest
+
+```bash
+cd "$REPO" && bash scripts/run_tests.sh
+```
+
+Opcional, migraciones y SQL contra PostgreSQL real en una base **desechable** (nunca `library_db`):
+
+```bash
+sudo -u postgres createdb -O library_user users_pruebas
+cd "$REPO/apps/services/users"
+TEST_DATABASE_URL="$(echo "$DB_URL" | sed 's|/[^/]*$|/users_pruebas|')" .venv/bin/python -m pytest -q tests/test_integracion_pg.py
+sudo -u postgres dropdb users_pruebas; cd "$REPO"
+```
+
+**Resultado (esperado: `Todas las suites pasaron.`):**
+
+```
+```
+
+## 12. Si algo falla en la Parte 2
+
+| Síntoma | Qué revisar |
+|---|---|
+| `crear_admin.py`: `ya hay OTRO administrador y la base solo admite uno` | `ADMIN_EMAIL` no es la cuenta que hoy tiene `es_admin = TRUE` (ver consulta de 10.1). Corrige `ADMIN_EMAIL` |
+| Login del admin responde 401 después de `crear_admin.py` | Su `password_hash` ya era un hash real (no se tocó): usa su contraseña anterior. Si no la recuerdas, pon temporalmente `UPDATE usuarios SET password_hash = 'hash_de_ejemplo' WHERE correo = 'admin@libreria.com';` y vuelve a correr el script |
+| `PATCH .../role` responde `409 UN_SOLO_ADMIN` | Es la regla del monolito. Solo si decides permitir varios admins: `psql "$DB_URL" -f apps/services/users/sql/opcional_permitir_varios_admins.sql` |
+| `POST /users` o `PATCH .../email` responde `400 ... sin registro MX` | El dominio del correo no existe o no recibe correo; usa uno real |
+| `PATCH .../email` responde `503 CORREO_NO_ENVIADO` | login no pudo enviar el correo: `journalctl -u login -n 30`, SMTP/Mailpit, y que `INTERNAL_API_KEY` sea igual en users y login |
+| users no arranca: `ModuleNotFoundError: email_validator` | Faltó reinstalar dependencias: `bash scripts/levantar_servicios.sh` |
+| `500` con `column "updated_at" does not exist` en `journalctl -u users` | No corrió `002_users.sql`: `psql "$DB_URL" -v ON_ERROR_STOP=1 -f apps/services/users/sql/002_users.sql` |
+
+
+---
+---
+
+# PARTE 3 — Microservicio authors
+
+Requisito: Partes 1 y 2 funcionando. Corre los bloques en orden y pega la salida en cada **Resultado**.
+
+## 13. Desplegar la Parte 3
+
+```bash
+cd ~/WebMonolitoAPI && export REPO="$(pwd)"       # ajusta la ruta
+git pull && git log --oneline -3
+DB_URL="$(grep '^DATABASE_URL=' apps/services/authors/.env | cut -d= -f2-)"
+
+# Lo que hay hoy en las tablas del monolito (se copiará una sola vez a las tablas nuevas)
+psql "$DB_URL" -c "SELECT COUNT(*) AS autores FROM autores;" -c "SELECT COUNT(*) AS relaciones FROM libro_autor;"
+
+# authors valida los ISBN contra books: confirma que BOOKS_URL apunta al servicio local
+grep -q '^BOOKS_URL=' apps/services/authors/.env || echo 'BOOKS_URL=http://127.0.0.1:5001' >> apps/services/authors/.env
+grep '^BOOKS_URL=' apps/services/authors/.env
+
+bash scripts/levantar_servicios.sh                # corre sql/001_authors.sql y reinicia los 6 servicios
+
+psql "$DB_URL" -c '\d authors' -c '\d author_books'
+psql "$DB_URL" -c "SELECT COUNT(*) AS authors FROM authors;" -c "SELECT COUNT(*) AS author_books FROM author_books;"
+psql "$DB_URL" -c "SELECT id, nombre, apellido, nacionalidad FROM authors ORDER BY id LIMIT 5;"
+psql "$DB_URL" -c "SELECT version, aplicada_en FROM schema_migraciones ORDER BY aplicada_en;"     # incluye 005_authors
+```
+
+Esperado: `authors` y `author_books` con los mismos conteos que `autores` y `libro_autor`; `author_books` con
+PK `(author_id, isbn)` y una sola llave foránea (a `authors`, ninguna a `libros`).
+
+**Resultado:**
+
+```
+```
+
+---
+
+## 14. Comprobación de la Parte 3
+
+Funciones de apoyo (misma terminal para todo el punto 14):
+
+```bash
+json() { python3 -c "import sys,json; d=json.load(sys.stdin); print(d$1)"; }
+A=http://127.0.0.1:5003; B=http://127.0.0.1:5001
+read -r -s -p "Contraseña de admin@libreria.com: " P; echo
+ADMIN_TOKEN="$(curl -s -X POST 'http://127.0.0.1:5000/login?format=json' -H 'Content-Type: application/json' \
+      -d "{\"email\":\"admin@libreria.com\",\"password\":\"$P\"}" | json '["data"]["token"]')"; unset P
+AUTH=(-H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json')
+ISBN="$(curl -s "$B/books?format=json" | json '[0]["isbn"]')"; echo "ISBN de prueba: $ISBN"
+```
+
+### 14.1 Lecturas públicas y carga inicial
+
+```bash
+curl -s "$A/authors?per_page=3"; echo
+curl -s "$A/authors/by-book/$ISBN"; echo
+```
+
+**Resultado (esperado: autores copiados del monolito, sin enviar token):**
+
+```
+```
+
+### 14.2 Crear un autor y relacionarlo con un libro existente
+
+```bash
+R="$(curl -s -X POST "$A/authors" "${AUTH[@]}" \
+      -d '{"nombre":"Autor","apellido":"De Prueba","nacionalidad":"Mexicana","fecha_nacimiento":"1980-01-15"}')"
+echo "$R"; AID="$(echo "$R" | json '["id"]')"
+curl -s -w ' -> %{http_code}\n' -X POST "$A/authors/$AID/books" "${AUTH[@]}" -d "{\"isbn\":\"$ISBN\"}"
+curl -s "$A/authors/$AID/books"; echo                       # con "titulo" (viene de books) y "enriquecido": true
+curl -s "$A/authors/by-book/$ISBN" | json '["authors"]' | tr ',' '\n' | grep nombre_completo
+```
+
+**Resultado (esperado: `201` con `titulo`, y el autor nuevo entre los autores del libro):**
+
+```
+```
+
+### 14.3 Cache hit en `/metrics` en la segunda consulta
+
+```bash
+antes="$(curl -s "$A/metrics" | json '["cache_hits"]')"
+curl -s -o /dev/null -w 'consulta 1 -> %{time_total}s\n' "$A/authors?q=prueba"
+curl -s -o /dev/null -w 'consulta 2 -> %{time_total}s\n' "$A/authors?q=prueba"
+echo "cache_hits: $antes -> $(curl -s "$A/metrics" | json '["cache_hits"]')"        # debe subir en 1
+if command -v valkey-cli >/dev/null; then CLI=valkey-cli; else CLI=redis-cli; fi
+read -r -s -p "Contraseña de Redis: " REDISCLI_AUTH; export REDISCLI_AUTH; echo
+$CLI -h 127.0.0.1 --scan --pattern 'authors:*'
+$CLI -h 127.0.0.1 ttl 'authors:list:q=prueba&page=1&per_page=20'                    # <= 60
+
+# Una escritura invalida toda la caché del servicio
+curl -s -o /dev/null -w 'PATCH -> %{http_code}\n' -X PATCH "$A/authors/$AID" "${AUTH[@]}" -d '{"biografia":"Cuenta de prueba"}'
+echo "claves authors:* tras escribir: $($CLI -h 127.0.0.1 --scan --pattern 'authors:*' | wc -l)"   # 0
+```
+
+**Resultado:**
+
+```
+```
+
+### 14.4 ISBN inexistente, books caído y permisos
+
+```bash
+# ISBN que no existe en books -> 404 LIBRO_NO_ENCONTRADO
+curl -s -w ' -> %{http_code}\n' -X POST "$A/authors/$AID/books" "${AUTH[@]}" -d '{"isbn":"9789999999999"}'
+# Relación repetida -> 409 RELACION_DUPLICADA
+curl -s -w ' -> %{http_code}\n' -X POST "$A/authors/$AID/books" "${AUTH[@]}" -d "{\"isbn\":\"$ISBN\"}"
+# Sin token -> 401
+curl -s -o /dev/null -w 'POST /authors sin token -> %{http_code}\n' -X POST "$A/authors" -H 'Content-Type: application/json' -d '{"nombre":"X"}'
+
+# books caído: no se puede validar el ISBN -> 503; las lecturas siguen, solo con los ISBN
+OTRO="$(curl -s "$B/books?format=json" | json '[1]["isbn"]')"
+sudo systemctl stop books
+curl -s -w ' -> %{http_code}\n' -X POST "$A/authors/$AID/books" "${AUTH[@]}" -d "{\"isbn\":\"$OTRO\"}"
+$CLI -h 127.0.0.1 del "authors:$AID:books" > /dev/null
+curl -s "$A/authors/$AID/books"; echo                       # "enriquecido": false, "titulo": null
+sudo systemctl start books; sleep 3
+curl -s "$A/authors/$AID/books"; echo                       # vuelve el título
+
+# Eliminar un autor con libros -> 409; con ?force=true -> 200 (deja limpio el autor de prueba)
+curl -s -w ' -> %{http_code}\n' -X DELETE "$A/authors/$AID" "${AUTH[@]}"
+curl -s -w ' -> %{http_code}\n' -X DELETE "$A/authors/$AID?force=true" "${AUTH[@]}"
+```
+
+Con el token de un cliente (por ejemplo maruchanvalo), cualquier escritura debe responder `403 ROL_INSUFICIENTE`.
+
+**Resultado (esperado: `404`, `409`, `401`, `503 BOOKS_NO_DISPONIBLE`, lista sin títulos, lista con título, `409`, `200`):**
+
+```
+```
+
+### 14.5 App Tk
+
+En tu máquina: `cd apps/Python_app && python main.py`.
+
+1. Entra como **admin** y abre **Autores**: tabla con los autores, y a la derecha *Libros del autor*.
+2. **+ Nuevo autor** → llena nombre y apellido → *Crear*. Selecciónalo en la tabla.
+3. En *Relacionar un libro* escribe parte de un título (o un ISBN) → *Buscar* → elige el libro en la lista →
+   **Relacionar**. Debe aparecer en *Libros del autor* con su título, y la columna *Libros* de la tabla pasa a 1.
+4. Abre **Libros** y selecciona ese libro: la franja *Detalle* bajo la tabla debe mostrar en *Autores* al autor recién
+   relacionado.
+5. De vuelta en **Autores**: selecciona el libro en el panel → **Quitar relación** (pide confirmación). Después
+   **Eliminar** al autor de prueba.
+6. Cierra sesión y entra como **cliente**: en Autores se ve la tabla y los libros de cada autor, pero **no** aparecen
+   *+ Nuevo autor*, *Editar*, *Eliminar*, *Quitar relación* ni el buscador para relacionar.
+
+**Resultado (qué viste en cada paso):**
+
+```
+```
+
+### 14.6 Pytest
+
+```bash
+cd "$REPO" && bash scripts/run_tests.sh
+```
+
+**Resultado (esperado: `Todas las suites pasaron.`):**
+
+```
+```
+
+## 15. Si algo falla en la Parte 3
+
+| Síntoma | Qué revisar |
+|---|---|
+| `500` y en `journalctl -u authors` aparece `relation "authors" does not exist` | No corrió la migración: `psql "$DB_URL" -v ON_ERROR_STOP=1 -f apps/services/authors/sql/001_authors.sql` |
+| Relacionar siempre responde `503 BOOKS_NO_DISPONIBLE` | `BOOKS_URL` en `apps/services/authors/.env` y `curl -s http://127.0.0.1:5001/health` |
+| `/authors/{id}/books` devuelve `"enriquecido": false` con books arriba | Igual que arriba; tras corregir, espera 60 s o reinicia authors |
+| En Libros (app Tk) *Autores* dice "No disponible" | El semáforo de Autores: `sudo systemctl status authors` |
+| Un autor aparece en books (columna Autor) pero no en el servicio de autores, o al revés | Es esperado: books conserva su propio campo de texto `autor` (tablas del monolito); la fuente de verdad es authors |
+
+
+---
+---
+
+# PARTE 4 — Microservicio pedidos
+
+Requisito: Partes 1 a 3 funcionando. Corre los bloques en orden y pega la salida en cada **Resultado**.
+
+## 16. Desplegar la Parte 4
+
+```bash
+cd ~/WebMonolitoAPI && export REPO="$(pwd)"       # ajusta la ruta
+git pull && git log --oneline -3
+DB_URL="$(grep '^DATABASE_URL=' apps/services/pedidos/.env | cut -d= -f2-)"
+
+# pedidos valida libros en books y usuarios en users, con la clave interna
+for v in BOOKS_URL=http://127.0.0.1:5001 USERS_URL=http://127.0.0.1:5002; do
+    grep -q "^${v%%=*}=" apps/services/pedidos/.env || echo "$v" >> apps/services/pedidos/.env
+done
+grep -q '^RESERVA_MINUTOS=' apps/services/pedidos/.env || echo 'RESERVA_MINUTOS=15' >> apps/services/pedidos/.env
+grep -E '^(BOOKS_URL|USERS_URL|RESERVA_MINUTOS)=' apps/services/pedidos/.env
+# La clave interna debe ser la misma en pedidos y users (cuenta valores distintos: esperado 1)
+cat apps/services/pedidos/.env apps/services/users/.env | grep '^INTERNAL_API_KEY=' | sort -u | wc -l
+
+bash scripts/levantar_servicios.sh                # corre sql/001_pedidos.sql y reinicia los 6 servicios
+
+psql "$DB_URL" -c '\dt inventario|pedido*'
+psql "$DB_URL" -c "SELECT COUNT(*) AS filas, SUM(stock_disponible) AS disponible FROM inventario;"
+psql "$DB_URL" -c "SELECT COUNT(*) AS libros, SUM(stock) AS stock FROM libros;"       # deben coincidir (carga inicial)
+sudo journalctl -u pedidos -n 20 --no-pager | grep -i 'expiracion'                    # "Tarea de expiracion de pedidos iniciada"
+```
+
+**Resultado:**
+
+```
+```
+
+---
+
+## 17. Comprobación de la Parte 4
+
+Funciones de apoyo (misma terminal para todo el punto 17). Necesitas la contraseña del admin y la de un cliente.
+
+```bash
+json() { python3 -c "import sys,json; d=json.load(sys.stdin); print(d$1)"; }
+entrar() {   # entrar CORREO -> deja el JWT en $TOKEN
+    local pass; read -r -s -p "Contraseña de $1: " pass; echo
+    TOKEN="$(curl -s -X POST 'http://127.0.0.1:5000/login?format=json' -H 'Content-Type: application/json' \
+              -d "{\"email\":\"$1\",\"password\":\"$pass\"}" | json '["data"]["token"]')"
+}
+P=http://127.0.0.1:5004
+stock() { curl -s "$P/inventario/$1" | json '["stock_disponible"], "disponible /", d["stock_reservado"], "reservado"'; }
+entrar admin@libreria.com;      ADMIN=(-H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json')
+entrar maruchanvalo@gmail.com;  CLI=(-H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json')
+ISBN="$(curl -s 'http://127.0.0.1:5001/books?format=json' | json '[0]["isbn"]')"; echo "ISBN de prueba: $ISBN"
+```
+
+### 17.1 Cargar stock como admin, crear un pedido como cliente y ver que el stock disponible baja
+
+```bash
+curl -s -w ' -> %{http_code}\n' -X PUT "$P/inventario/$ISBN" "${ADMIN[@]}" -d '{"stock_disponible": 10}'
+stock "$ISBN"                                               # 10 disponible / 0 reservado
+
+R="$(curl -s -X POST "$P/pedidos" "${CLI[@]}" -d "{\"lineas\":[{\"isbn\":\"$ISBN\",\"cantidad\":3}]}")"
+echo "$R"; PID="$(echo "$R" | json '["id"]')"
+stock "$ISBN"                                               # 7 disponible / 3 reservado
+curl -s "$P/pedidos" "${CLI[@]}" | json '["items"]'
+```
+
+**Resultado (esperado: `201` con `estado: PENDIENTE_PAGO`, título y precio copiados, `expira_en`; stock 7 / 3):**
+
+```
+```
+
+### 17.2 Falta de stock, edición y cancelación (el stock regresa)
+
+```bash
+# Más de lo disponible -> 409 STOCK_INSUFICIENTE indicando el ISBN
+curl -s -w ' -> %{http_code}\n' -X POST "$P/pedidos" "${CLI[@]}" -d "{\"lineas\":[{\"isbn\":\"$ISBN\",\"cantidad\":50}]}"
+# ISBN inexistente -> 404
+curl -s -w ' -> %{http_code}\n' -X POST "$P/pedidos" "${CLI[@]}" -d '{"lineas":[{"isbn":"9789999999999","cantidad":1}]}'
+
+# Editar el pedido: de 3 a 5 unidades -> la reserva se reajusta
+curl -s -o /dev/null -w 'PATCH lineas -> %{http_code}\n' -X PATCH "$P/pedidos/$PID/lineas" "${CLI[@]}" \
+     -d "{\"lineas\":[{\"isbn\":\"$ISBN\",\"cantidad\":5}]}"
+stock "$ISBN"                                               # 5 disponible / 5 reservado
+
+# Cancelar -> el stock regresa
+curl -s "$P/pedidos/$PID/cancelar" -X PATCH "${CLI[@]}" | json '["estado"], d["historial"]'
+stock "$ISBN"                                               # 10 disponible / 0 reservado
+```
+
+**Resultado:**
+
+```
+```
+
+### 17.3 Transiciones de estado y permisos
+
+```bash
+R="$(curl -s -X POST "$P/pedidos" "${CLI[@]}" -d "{\"lineas\":[{\"isbn\":\"$ISBN\",\"cantidad\":1}]}")"; PID2="$(echo "$R" | json '["id"]')"
+KEY="$(grep '^INTERNAL_API_KEY=' apps/services/pedidos/.env | cut -d= -f2-)"
+
+# El cliente no puede cambiar estados (403) y el admin no puede saltarse el pago (409)
+curl -s -o /dev/null -w 'cliente marca ENVIADO -> %{http_code}\n' -X PATCH "$P/pedidos/$PID2/estado" "${CLI[@]}" -d '{"estado":"ENVIADO"}'
+curl -s -w ' -> %{http_code}\n' -X PATCH "$P/pedidos/$PID2/estado" "${ADMIN[@]}" -d '{"estado":"ENVIADO"}'
+
+# Lo que hará el servicio pagos (Parte 5): marcar PAGADO con la clave interna
+curl -s -o /dev/null -w 'interno PAGADO -> %{http_code}\n' -X PATCH "$P/pedidos/internal/$PID2/estado" \
+     -H "X-Internal-Key: $KEY" -H 'Content-Type: application/json' -d '{"estado":"PAGADO"}'
+stock "$ISBN"                                               # 9 disponible / 0 reservado (venta confirmada)
+curl -s -o /dev/null -w 'admin ENVIADO -> %{http_code}\n'   -X PATCH "$P/pedidos/$PID2/estado" "${ADMIN[@]}" -d '{"estado":"ENVIADO"}'
+curl -s -o /dev/null -w 'admin ENTREGADO -> %{http_code}\n' -X PATCH "$P/pedidos/$PID2/estado" "${ADMIN[@]}" -d '{"estado":"ENTREGADO"}'
+curl -s "$P/pedidos/$PID2" "${CLI[@]}" | json '["historial"]'
+curl -s -o /dev/null -w 'cancelar un ENTREGADO -> %{http_code}\n' -X PATCH "$P/pedidos/$PID2/cancelar" "${ADMIN[@]}"
+curl -s -o /dev/null -w 'eliminar un ENTREGADO -> %{http_code}\n' -X DELETE "$P/pedidos/$PID2" "${ADMIN[@]}"
+curl -s -o /dev/null -w 'eliminar el CANCELADO -> %{http_code}\n' -X DELETE "$P/pedidos/$PID" "${ADMIN[@]}"
+curl -s -o /dev/null -w 'GET /pedidos sin token -> %{http_code}\n' "$P/pedidos"
+unset KEY
+```
+
+**Resultado (esperado: `403`, `409 TRANSICION_INVALIDA`, `200`, stock 9 / 0, `200`, `200`, historial de 4 pasos, `409`, `409`, `200`, `401`):**
+
+```
+```
+
+### 17.4 Expiración con la reserva en 1 minuto
+
+```bash
+sed -i 's/^RESERVA_MINUTOS=.*/RESERVA_MINUTOS=1/' apps/services/pedidos/.env
+sudo systemctl restart pedidos; sleep 3
+sudo journalctl -u pedidos -n 5 --no-pager | grep 'reserva de 1 min'
+
+R="$(curl -s -X POST "$P/pedidos" "${CLI[@]}" -d "{\"lineas\":[{\"isbn\":\"$ISBN\",\"cantidad\":2}]}")"; PID3="$(echo "$R" | json '["id"]')"
+echo "$R" | json '["estado"], "expira", d["expira_en"]'
+stock "$ISBN"                                               # 7 disponible / 2 reservado
+if command -v valkey-cli >/dev/null; then RC=valkey-cli; else RC=redis-cli; fi
+read -r -s -p "Contraseña de Redis: " REDISCLI_AUTH; export REDISCLI_AUTH; echo
+$RC -h 127.0.0.1 ttl "pedido:reserva:$PID3"                 # <= 60
+
+echo "Esperando 2 minutos y medio (la tarea revisa cada minuto)..."; sleep 150
+curl -s "$P/pedidos/$PID3" "${CLI[@]}" | json '["estado"], d["historial"][-1]'      # EXPIRADO, actor sistema:expiracion
+stock "$ISBN"                                               # 9 disponible / 0 reservado
+sudo journalctl -u pedidos --since '4 minutes ago' --no-pager | grep 'Pedidos expirados'
+
+# Regresa la reserva a 15 minutos
+sed -i 's/^RESERVA_MINUTOS=.*/RESERVA_MINUTOS=15/' apps/services/pedidos/.env
+sudo systemctl restart pedidos
+```
+
+**Resultado:**
+
+```
+```
+
+### 17.5 App Tk
+
+En tu máquina: `cd apps/Python_app && python main.py`.
+
+1. Entra como **admin** y abre **Pedidos**: hay tres pestañas (*Comprar*, *Gestión*, *Inventario*).
+2. **Inventario:** selecciona un libro, escribe un stock y pulsa *Guardar stock*. La columna *Disponible* cambia.
+3. Cierra sesión y entra como **cliente**: en Pedidos solo aparece *Comprar*.
+4. En el catálogo (izquierda) selecciona un libro y pulsa **Agregar al carrito →** dos veces. En el carrito (centro)
+   cambia la cantidad con el selector; el total se actualiza. Pulsa **Crear pedido**.
+5. El pedido aparece en **Mis pedidos** (derecha) en amarillo, *PENDIENTE PAGO*, y el *Disp.* del catálogo baja.
+   Selecciónalo: se ven sus líneas, cuándo vence la reserva y el historial. **Ir a pagar** está deshabilitado.
+6. Pulsa **Editar**: el carrito dice *Editando pedido #N*. Cambia una cantidad y pulsa **Guardar cambios**.
+7. Pulsa **Cancelar** (pide confirmación): el pedido queda en rojo, *CANCELADO*, y el *Disp.* del catálogo regresa.
+8. Vuelve a entrar como **admin** → **Gestión**: filtra por estado; selecciona un pedido *PAGADO* (el de 17.3 ya está
+   entregado; puedes marcar otro como pagado con el curl interno) y usa *Marcar ENVIADO* y *Marcar ENTREGADO*.
+
+**Resultado (qué viste en cada paso):**
+
+```
+```
+
+### 17.6 Pytest
+
+```bash
+cd "$REPO" && bash scripts/run_tests.sh
+```
+
+**Resultado (esperado: `Todas las suites pasaron.`):**
+
+```
+```
+
+## 18. Si algo falla en la Parte 4
+
+| Síntoma | Qué revisar |
+|---|---|
+| `500` y `relation "inventario" does not exist` en `journalctl -u pedidos` | No corrió la migración: `psql "$DB_URL" -v ON_ERROR_STOP=1 -f apps/services/pedidos/sql/001_pedidos.sql` |
+| Crear un pedido responde `503 USERS_NO_DISPONIBLE` | `USERS_URL` en el `.env` de pedidos; que `INTERNAL_API_KEY` sea igual en pedidos y users; `systemctl status users` |
+| Crear un pedido responde `503 BOOKS_NO_DISPONIBLE` | `BOOKS_URL` en el `.env` de pedidos; `curl -s http://127.0.0.1:5001/health` |
+| `409 STOCK_INSUFICIENTE` con stock en la pantalla Libros | El stock vendible es el de **Inventario** (pedidos), no la columna Stock de Libros: cárgalo en Pedidos → Inventario |
+| Los pedidos vencidos no pasan a `EXPIRADO` | `journalctl -u pedidos | grep -i expiracion`: debe decir que la tarea inició; si dice "Redis no disponible", revisa `REDIS_URL`. Espera al menos 1 minuto tras el vencimiento |
+| `403 USUARIO_NO_VALIDO` | La cuenta está desactivada en users |

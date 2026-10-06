@@ -4,6 +4,9 @@ Catalogo de libros: buscador y tabla (Treeview) con crear (POST), editar
 (PUT), editar parcial (PATCH) y eliminar (DELETE). Solo se llega aqui con
 sesion iniciada; las escrituras viajan con el JWT y requieren rol admin.
 El semaforo, Configuración y Cerrar sesión viven en la ventana principal.
+
+Al seleccionar un libro, la franja de detalle bajo la tabla muestra sus
+datos y sus autores segun el microservicio authors (GET /authors/by-book).
 """
 import tkinter as tk
 import webbrowser
@@ -33,6 +36,7 @@ class CatalogScreen(ttk.Frame):
         self.app = app
         self._todos_libros = []
         self._libros_por_iid = {}
+        self._peticion_autores = 0     # ultima consulta de autores pedida (las respuestas viejas se descartan)
 
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -40,6 +44,7 @@ class CatalogScreen(ttk.Frame):
         self._construir_barra_superior()
         self._construir_barra_acciones()
         self._construir_tabla()
+        self._construir_detalle()
 
     # ---------------------------------------------------------- UI
     def _construir_barra_superior(self):
@@ -93,6 +98,7 @@ class CatalogScreen(ttk.Frame):
         self.tabla.tag_configure("vacio", foreground=theme.COLOR_TEXTO_SUAVE)
         self.tabla.bind("<Double-1>", lambda e: self._editar_seleccion())
         self.tabla.bind("<Delete>", lambda e: self._eliminar_seleccion())
+        self.tabla.bind("<<TreeviewSelect>>", lambda e: self._mostrar_detalle())
 
         scroll_y = ttk.Scrollbar(marco, orient="vertical", command=self.tabla.yview)
         scroll_x = ttk.Scrollbar(marco, orient="horizontal", command=self.tabla.xview)
@@ -100,6 +106,54 @@ class CatalogScreen(ttk.Frame):
         self.tabla.grid(row=0, column=0, sticky="nsew")
         scroll_y.grid(row=0, column=1, sticky="ns")
         scroll_x.grid(row=1, column=0, sticky="ew")
+
+    def _construir_detalle(self):
+        """Franja bajo la tabla con el detalle del libro seleccionado y sus autores."""
+        franja = ttk.Frame(self, style="Card.TFrame", padding=(14, 10))
+        franja.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        franja.grid_columnconfigure(1, weight=1)
+        ttk.Label(franja, text="Detalle", style="Subtitulo.TLabel").grid(row=0, column=0, sticky="nw", padx=(0, 12))
+        self.detalle_var = tk.StringVar(value="Selecciona un libro para ver su detalle y sus autores.")
+        ttk.Label(franja, textvariable=self.detalle_var, style="Card.TLabel", justify="left").grid(
+            row=0, column=1, sticky="w")
+        ttk.Label(franja, text="Autores", style="Subtitulo.TLabel").grid(row=1, column=0, sticky="nw", padx=(0, 12),
+                                                                          pady=(4, 0))
+        self.autores_var = tk.StringVar(value="—")
+        self._autores_label = ttk.Label(franja, textvariable=self.autores_var, style="Card.TLabel", justify="left",
+                                        wraplength=760)
+        self._autores_label.grid(row=1, column=1, sticky="w", pady=(4, 0))
+
+    def _mostrar_detalle(self):
+        seleccion = self.tabla.selection()
+        libro = self._libros_por_iid.get(seleccion[0]) if seleccion else None
+        self._peticion_autores += 1
+        if libro is None:
+            self.detalle_var.set("Selecciona un libro para ver su detalle y sus autores.")
+            self.autores_var.set("—")
+            return
+        precio = libro.get("precio")
+        self.detalle_var.set(
+            f"{libro.get('titulo')}  ·  ISBN {libro.get('isbn')}  ·  {libro.get('anio') or '—'}  ·  "
+            f"{libro.get('formato') or '—'}  ·  {'$' + format(float(precio), ',.2f') if precio is not None else '—'}"
+            f"  ·  stock {libro.get('stock') if libro.get('stock') is not None else '—'}")
+        self.autores_var.set("Consultando el servicio de autores...")
+        numero, isbn = self._peticion_autores, libro.get("isbn")
+
+        def ok(datos):
+            if numero != self._peticion_autores:
+                return
+            autores = datos.get("authors", [])
+            self.autores_var.set(
+                "  ·  ".join(f"{a['orden']}. {a['nombre_completo']}" + (f" ({a['nacionalidad']})" if a.get("nacionalidad") else "")
+                             for a in autores)
+                if autores else "Sin autores relacionados en el servicio de autores.")
+
+        def error(e):
+            if numero == self._peticion_autores:
+                self.autores_var.set("No disponible: el servicio de autores no responde "
+                                     f"({e.mensaje if isinstance(e, ApiError) else e}).")
+
+        run_async(self, lambda: self.app.authors.by_book(isbn), ok, error)
 
     # ---------------------------------------------------------- ciclo de vida
     def on_show(self):
@@ -152,6 +206,7 @@ class CatalogScreen(ttk.Frame):
         self.tabla.delete(*self.tabla.get_children())
         self._libros_por_iid = {}
 
+        self._mostrar_detalle()        # la seleccion se pierde al repintar
         if not libros:
             self.tabla.insert("", "end", values=("", "No hay libros que mostrar."), tags=("vacio",))
             return

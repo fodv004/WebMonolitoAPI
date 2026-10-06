@@ -36,3 +36,32 @@ BOOKS_LIST_PATTERN = "books:list:*"
 
 def book(isbn):
     return f"books:{isbn}"
+
+
+# --- microservicio authors (cache de 60 s; cualquier escritura invalida AUTHORS_PATTERN con SCAN)
+AUTHORS_PATTERN = "authors:*"
+
+
+def authors_list(filtros):
+    return f"authors:list:{filtros}"
+
+
+def author(author_id):
+    return f"authors:{author_id}"
+
+
+def author_books(author_id):
+    return f"authors:{author_id}:books"
+
+
+def authors_by_book(isbn):
+    return f"authors:by-book:{isbn}"
+
+
+# --- microservicio pedidos
+LOCK_EXPIRAR_PEDIDOS = "lock:pedidos:expirar"     # SET NX EX LOCK_TTL antes de cada vuelta de la tarea
+
+
+def pedido_reserva(pedido_id):
+    """Espejo de la reserva de stock de un pedido PENDIENTE_PAGO (TTL = minutos de reserva)."""
+    return f"pedido:reserva:{pedido_id}"

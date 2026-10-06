@@ -70,9 +70,15 @@ def rotar(refresh_token, email, role_id):
     crudo_sesion = cliente.get(redis_keys.session(session_id))
     if not crudo_sesion:
         return None
+    anterior = json.loads(crudo_sesion)
 
     pipe = cliente.pipeline()
-    datos = _guardar(pipe, session_id, user_id, email, role_id, json.loads(crudo_sesion).get("created_at"))
+    # El JWT anterior deja de servir al renovarlo: asi la sesion nunca tiene mas de un
+    # token vivo y cerrar sus sesiones (common/session_store.py) los revoca todos.
+    restante = int(anterior.get("exp", 0)) - int(time.time())
+    if anterior.get("jti") and restante > 0:
+        pipe.set(redis_keys.jwt_revoked(anterior["jti"]), "1", ex=restante)
+    datos = _guardar(pipe, session_id, user_id, email, role_id, anterior.get("created_at"))
     pipe.execute()
     return datos
 
