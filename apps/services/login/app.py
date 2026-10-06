@@ -2,37 +2,47 @@
 app.py
 Entrypoint del microservicio de autenticacion (Flask, puerto 5000).
 
-Rutas propias: /register /login /logout /session /health /confirm /confirmed
-y la documentacion Swagger en /apidocs/. No comparte ninguna ruta con el
+Rutas propias: /register /login /refresh /logout /session /confirm /confirmed,
+/health y /metrics (modulo comun) y la documentacion Swagger en /apidocs/. No comparte ninguna ruta con el
 microservicio de libros (puerto 5001: /books, /books/<isbn>, /books/gallery,
 /cloud-concepts, /soap) ni con el monolito (puerto 3000).
 """
 import logging
 
 import psycopg2
+import redis
 from flask import Flask, redirect, request
 from flasgger import Swagger
 from werkzeug.exceptions import HTTPException
 
-from config import Config
+from config import Config  # primero: agrega apps/services al path (modulo `common`)
+from common.cors import init_cors
+from common.health import init_health
+from common.logging_utils import init_logging
+from common.metrics import init_metrics
+from db import get_conn
 from responses import ApiError, failure
 from routes import bp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("auth")
 
+SERVICE_NAME = "login"
+VERSION = "2.0.0"
+
 SWAGGER_TEMPLATE = {
     "swagger": "2.0",
     "info": {
         "title": "Microservicio de Autenticación",
-        "version": "1.0.0",
+        "version": VERSION,
         "description": (
             "Registro, inicio de sesión y sesión de usuarios de la librería en línea.\n\n"
             "**Formato de las respuestas:** todos los endpoints responden **XML por defecto** "
             "y **JSON** con `?format=json` (`?format=xml` es equivalente a omitirlo). "
             "Los errores usan el mismo sobre (`status`, `code`, `message`) en el formato pedido.\n\n"
-            "**Sesión:** `POST /login` entrega la cookie `auth_session` (sesión de Flask); "
-            "el navegador la reenvía sola en `/session` y `/logout`.\n\n"
+            "**Sesión:** `POST /login` entrega la cookie `auth_session` (sesión de Flask), un JWT de "
+            "acceso de 20 minutos y un refresh token (7 días, en Redis). `POST /refresh` renueva el JWT "
+            "y `POST /logout` lo revoca.\n\n"
             "**Confirmación:** `POST /register` envía un correo (Mailpit, "
             "interfaz web en http://localhost:8025) con el enlace `/confirm?token=...`."
         ),
@@ -112,11 +122,23 @@ _MENSAJES_HTTP = {
 }
 
 
+def _db_ok():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+    return True
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
     app.json.ensure_ascii = False
     app.json.sort_keys = False
+
+    init_logging(app)
+    init_cors(app)
+    init_metrics(app, SERVICE_NAME)
+    init_health(app, SERVICE_NAME, _db_ok, VERSION)
 
     app.register_blueprint(bp)
     Swagger(app, template=SWAGGER_TEMPLATE, config=SWAGGER_CONFIG)
@@ -138,6 +160,13 @@ def create_app():
     def _db_down(err):
         log.error("PostgreSQL no disponible: %s", err)
         return failure(ApiError(503, "BASE_DE_DATOS_NO_DISPONIBLE", "PostgreSQL no responde."))
+
+    @app.errorhandler(redis.RedisError)
+    def _redis_down(err):
+        # Sesion, refresh y revocacion dependen de Redis: se falla de forma segura.
+        log.error("Redis no disponible: %s", err)
+        return failure(ApiError(503, "REDIS_NO_DISPONIBLE",
+                                "El servicio de sesiones no esta disponible. Intenta de nuevo en unos minutos."))
 
     @app.errorhandler(Exception)
     def _unexpected(err):

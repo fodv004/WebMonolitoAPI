@@ -6,10 +6,17 @@ entorno (.env). Ningun secreto vive en el codigo.
 import logging
 import os
 import secrets
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# apps/services en el path: ahi vive el modulo compartido `common`.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from common.config import settings  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +27,7 @@ def _bool(name, default=False):
 
 class Config:
     HOST = os.getenv("FLASK_HOST", "0.0.0.0")
-    PORT = int(os.getenv("FLASK_PORT", "5000"))
+    PORT = settings.PORT or 5000
 
     # Sesion del lado de Flask (cookie firmada). Nombre propio para no chocar con
     # las cookies de otros servicios que comparten host (p. ej. connect.sid del monolito).
@@ -52,20 +59,13 @@ class Config:
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000").rstrip("/")
     CONFIRM_TOKEN_HOURS = int(os.getenv("CONFIRM_TOKEN_HOURS", "24"))
 
-    # JWT que emite POST /login y que valida el microservicio de libros.
-    # El secreto DEBE ser el mismo en ambos servicios.
-    JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
-    JWT_ALGORITHM = "HS256"
-    JWT_EXPIRATION_SECONDS = 3600  # 1 hora
+    # JWT de acceso que emite POST /login y que validan todos los microservicios
+    # (common/auth.py). Secreto: JWT_SECRET_KEY, compartido por los 6 servicios;
+    # si falta, common.config usa JWT_SECRET o SECRET_KEY como respaldo, o aborta.
+    JWT_SECRET = settings.JWT_SECRET_KEY
+    JWT_ALGORITHM = settings.JWT_ALGORITHM
+    JWT_EXPIRATION_SECONDS = settings.ACCESS_TOKEN_SECONDS  # 20 minutos
 
-
-if not Config.JWT_SECRET:
-    raise SystemExit(
-        "ERROR: la variable de entorno JWT_SECRET no esta definida. "
-        "El microservicio de login no puede firmar tokens sin ella. "
-        "Definela en el .env o en la terminal (con el MISMO valor que en el servicio de libros) "
-        "y vuelve a arrancar."
-    )
 
 if not Config.SECRET_KEY:
     Config.SECRET_KEY = secrets.token_hex(32)

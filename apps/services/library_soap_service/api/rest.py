@@ -7,14 +7,21 @@ datos de libros/conceptos en XML o JSON segun el query parameter
 
 Las rutas GET son publicas. POST /books, PUT /books/<isbn>,
 PATCH /books/<isbn> y DELETE /books/<isbn> exigen un JWT valido del
-microservicio de login (ver api/auth_jwt.py).
+microservicio de login y rol admin (ver api/auth_jwt.py).
+
+GET /books y GET /books/<isbn> se cachean 60 s en Redis (claves
+books:list:<filtros> y books:<isbn>) y cualquier escritura invalida la
+cache. Redis es opcional para estas lecturas: si falla se consulta
+PostgreSQL. GET /health y GET /metrics los registra app.py (modulo comun).
 """
 import xml.etree.ElementTree as ET
+from decimal import Decimal
 
 import psycopg2
 from flask import Blueprint, Response, jsonify, request
 
 from api.auth_jwt import jwt_requerido
+from common import redis_client, redis_keys
 from db.connection import get_connection
 
 rest_bp = Blueprint("rest_api", __name__)
@@ -62,6 +69,51 @@ def _resolver_formato():
 def _xml_response(root_element):
     body = ET.tostring(root_element, encoding="unicode")
     return Response(f'<?xml version="1.0" encoding="UTF-8"?>\n{body}', mimetype="application/xml")
+
+
+# ============================================================
+# Cache del catalogo en Redis. Se guardan los DATOS (no la respuesta
+# ya serializada): el href de cada tarjeta depende del host de quien
+# pregunta. El precio viaja como texto para no perder decimales.
+# ============================================================
+def _filas_json(filas):
+    return [[str(v) if isinstance(v, Decimal) else v for v in fila] for fila in filas]
+
+
+def _invalidar_cache_libros(isbn):
+    redis_client.cache_delete(redis_keys.book(isbn))
+    redis_client.cache_invalidate(redis_keys.BOOKS_LIST_PATTERN)
+
+
+def _datos_lista(formato):
+    """Filas del catalogo (y, para xml, los conceptos cloud de cada libro)."""
+    clave = redis_keys.books_list(f"format={formato}")
+    datos = redis_client.cache_get(clave)
+    if datos is None:
+        libros = _filas_json(_fetch_todos_libros())
+        datos = {"libros": libros}
+        if formato == "xml":
+            datos["conceptos"] = {fila[0]: _filas_json(_fetch_conceptos_cloud_libro(fila[0])) for fila in libros}
+        redis_client.cache_set(clave, datos, redis_keys.CACHE_TTL)
+    return datos
+
+
+def _datos_libro(isbn):
+    """Libro + portada + conceptos cloud, o None si no existe (los 404 no se cachean)."""
+    clave = redis_keys.book(isbn)
+    datos = redis_client.cache_get(clave)
+    if datos is None:
+        libro = _fetch_libro(isbn)
+        if libro is None:
+            return None
+        isbn_db = libro[0]
+        datos = {
+            "libro": _filas_json([libro])[0],
+            "portada": _fetch_portada(isbn_db),
+            "conceptos": _filas_json(_fetch_conceptos_cloud_libro(isbn_db)),
+        }
+        redis_client.cache_set(clave, datos, redis_keys.CACHE_TTL)
+    return datos
 
 
 # ============================================================
@@ -359,7 +411,8 @@ def _fetch_libros_minimos_con_imagenes():
 @rest_bp.route("/books", methods=["GET"])
 def listar_libros():
     formato = _resolver_formato()
-    libros = _fetch_todos_libros()
+    datos = _datos_lista(formato)
+    libros = datos["libros"]
 
     if formato == "json":
         return jsonify([_card_dict(fila) for fila in libros]), 200
@@ -377,7 +430,7 @@ def listar_libros():
         ET.SubElement(book_el, "image_url").text = imagen_url
 
         concepts_el = ET.SubElement(book_el, "cloudConcepts")
-        for id_concepto, nombre_concepto, modelo_cloud, votos in _fetch_conceptos_cloud_libro(isbn):
+        for id_concepto, nombre_concepto, modelo_cloud, votos in datos["conceptos"].get(isbn, []):
             concept_el = ET.SubElement(concepts_el, "concept", {
                 "id": str(id_concepto),
                 "model": modelo_cloud,
@@ -396,14 +449,14 @@ def listar_libros():
 def obtener_libro(isbn):
     formato = _resolver_formato()
 
-    libro = _fetch_libro(isbn)
-    if libro is None:
+    datos = _datos_libro(isbn)
+    if datos is None:
         return jsonify({
             "error": "LIBRO_NO_ENCONTRADO",
             "mensaje": f"No existe un libro con ISBN {isbn}.",
         }), 404
 
-    isbn_db, titulo, anio, precio, stock, formato_nombre = libro
+    isbn_db, titulo, anio, precio, stock, formato_nombre = datos["libro"]
 
     if formato == "json":
         card = {
@@ -413,7 +466,7 @@ def obtener_libro(isbn):
             "precio": float(precio),
             "stock": stock,
             "formato": formato_nombre,
-            "portada": _fetch_portada(isbn_db),
+            "portada": datos["portada"],
             "href": request.base_url,
         }
         return jsonify(card), 200
@@ -426,7 +479,7 @@ def obtener_libro(isbn):
     ET.SubElement(book_el, "format").text = formato_nombre
 
     concepts_el = ET.SubElement(book_el, "cloudConcepts")
-    for id_concepto, nombre_concepto, modelo_cloud, votos in _fetch_conceptos_cloud_libro(isbn_db):
+    for id_concepto, nombre_concepto, modelo_cloud, votos in datos["conceptos"]:
         concept_el = ET.SubElement(concepts_el, "concept", {
             "id": str(id_concepto),
             "model": modelo_cloud,
@@ -508,30 +561,9 @@ def obtener_libros_con_imagenes():
 
 
 # ============================================================
-# 5. Salud del servicio (usado por el semaforo de la app cliente).
+# 5. Salud del servicio: GET /health lo registra app.py con el
+#    modulo comun (common/health.py), igual que GET /metrics.
 # ============================================================
-@rest_bp.route("/health", methods=["GET"])
-def salud():
-    formato = _resolver_formato()
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1")
-    except psycopg2.Error:
-        return jsonify({
-            "status": "error",
-            "code": "BASE_DE_DATOS_NO_DISPONIBLE",
-            "mensaje": "PostgreSQL no responde.",
-        }), 503
-    finally:
-        conn.close()
-
-    if formato == "json":
-        return jsonify({"status": "ok", "service": "books"}), 200
-    root = ET.Element("health")
-    ET.SubElement(root, "status").text = "ok"
-    ET.SubElement(root, "service").text = "books"
-    return _xml_response(root)
 
 
 # ============================================================
@@ -605,6 +637,7 @@ def crear_libro():
     finally:
         conn.close()
 
+    _invalidar_cache_libros(isbn)
     return jsonify(_card_dict(_fetch_libro_card(isbn))), 201
 
 
@@ -678,6 +711,7 @@ def _actualizar_campos_enviados(isbn):
     finally:
         conn.close()
 
+    _invalidar_cache_libros(isbn)
     return jsonify(_card_dict(_fetch_libro_card(isbn))), 200
 
 
@@ -707,4 +741,5 @@ def eliminar_libro(isbn):
     finally:
         conn.close()
 
+    _invalidar_cache_libros(isbn)
     return jsonify({"status": "ok", "mensaje": f"Libro {isbn} eliminado.", "isbn": isbn}), 200

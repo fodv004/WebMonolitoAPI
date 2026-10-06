@@ -1,0 +1,4 @@
+# Los scripts de la VM deben conservar fin de linea LF aunque se editen en Windows.
+*.sh text eol=lf
+*.service text eol=lf
+*.sql text eol=lf

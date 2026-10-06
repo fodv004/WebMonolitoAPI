@@ -7,17 +7,22 @@ Hash de contrasenas y tokens de confirmacion.
   el monolito y viceversa. Solo se guarda el hash; nunca la contrasena.
 * Tokens: 256 bits aleatorios (secrets). En BD solo se guarda su SHA-256, de
   modo que una fuga de la tabla no permite confirmar cuentas.
-* JWT de acceso: HS256 firmado con JWT_SECRET (PyJWT). Claims user_id,
-  email, iat y exp (1 hora). Lo valida el microservicio de libros.
+* JWT de acceso: HS256 firmado con JWT_SECRET_KEY (PyJWT), 20 minutos.
+  Claims sub, user_id, role_id, role, jti, iat, exp, type="access" (mas
+  email y sid, el id de la sesion en Redis). Lo validan todos los
+  microservicios con common/auth.py.
+* Refresh token: 256 bits aleatorios; en Redis solo se guarda su SHA-256.
 """
 import hashlib
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
 
 from config import Config
+from common.auth import ROLES
 
 BCRYPT_ROUNDS = 12
 # bcrypt solo considera los primeros 72 bytes de la contrasena.
@@ -57,13 +62,32 @@ def token_digest(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_access_token(user_id, email):
-    """JWT HS256 con user_id, email, iat y exp (iat + 1 hora)."""
+def create_access_token(user_id, email, role_id, session_id):
+    """Devuelve (token, jti, exp). `exp` es el instante de expiracion (epoch, segundos)."""
     ahora = datetime.now(timezone.utc)
+    expira = ahora + timedelta(seconds=Config.JWT_EXPIRATION_SECONDS)
+    jti = uuid.uuid4().hex
     payload = {
+        "sub": str(user_id),
         "user_id": user_id,
+        "role_id": role_id,
+        "role": ROLES.get(role_id, "cliente"),
         "email": email,
+        "sid": session_id,
+        "jti": jti,
         "iat": ahora,
-        "exp": ahora + timedelta(seconds=Config.JWT_EXPIRATION_SECONDS),
+        "exp": expira,
+        "type": "access",
     }
-    return jwt.encode(payload, Config.JWT_SECRET, algorithm=Config.JWT_ALGORITHM)
+    token = jwt.encode(payload, Config.JWT_SECRET, algorithm=Config.JWT_ALGORITHM)
+    return token, jti, int(expira.timestamp())
+
+
+def decode_own_token(token):
+    """Payload de un JWT firmado por este servicio, aunque ya haya expirado
+    (logout debe poder cerrar la sesion de un token vencido). None si no es valido."""
+    try:
+        return jwt.decode(token, Config.JWT_SECRET, algorithms=[Config.JWT_ALGORITHM],
+                          options={"verify_exp": False})
+    except jwt.InvalidTokenError:
+        return None

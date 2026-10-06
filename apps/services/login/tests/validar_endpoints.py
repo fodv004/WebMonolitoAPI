@@ -114,12 +114,12 @@ def main():
 
     # ------------------------------------------------------------
     seccion("GET /health")
-    for etiqueta, q in (("sin format (xml por defecto)", ""), ("?format=xml", "?format=xml"), ("?format=json", "?format=json"), ("?format=JSON (mayusculas)", "?format=JSON")):
-        st, h, body = web.request("GET", "/health" + q)
-        esperado = "json" if "json" in q.lower() else "xml"
-        check(f"health {etiqueta}: 200 y {esperado}", st == 200 and esperado in h["Content-Type"] and campo(body, "data.database.status") == "up",
-              f"{st} {h.get('Content-Type')} {body[:120]}")
-    st, h, body = web.request("GET", "/health?format=yaml")
+    # /health lo sirve el modulo comun: siempre JSON, 200 solo si PostgreSQL y Redis responden.
+    st, h, body = web.request("GET", "/health")
+    check("health: 200 json con db y redis ok", st == 200 and "json" in h["Content-Type"]
+          and campo(body, "status") == "ok" and campo(body, "db") == "ok" and campo(body, "redis") == "ok",
+          f"{st} {h.get('Content-Type')} {body[:120]}")
+    st, h, body = web.request("GET", "/session?format=yaml")
     check("format inválido -> 400 FORMATO_INVALIDO", st == 400 and campo(body, "code") == "FORMATO_INVALIDO", f"{st} {body[:120]}")
     st, h, body = web.request("GET", "/ruta-inexistente?format=json")
     check("ruta inexistente -> 404 con el mismo sobre (json)", st == 404 and campo(body, "status") == "error", f"{st} {body[:100]}")
@@ -250,7 +250,7 @@ def main():
     check("/apidocs/ (Swagger UI) -> 200 html", st == 200 and "text/html" in h["Content-Type"])
     st, h, body = web.request("GET", "/apispec_1.json")
     spec = json.loads(body) if st == 200 else {"paths": {}}
-    for ruta, metodo in (("/register", "post"), ("/login", "post"), ("/logout", "post"), ("/session", "get"), ("/health", "get"), ("/confirm", "get")):
+    for ruta, metodo in (("/register", "post"), ("/login", "post"), ("/refresh", "post"), ("/logout", "post"), ("/session", "get"), ("/confirm", "get")):
         op = spec["paths"].get(ruta, {}).get(metodo)
         ok = bool(op) and {"application/xml", "application/json"} <= set(op.get("produces", []))
         check(f"spec documenta {metodo.upper()} {ruta} con application/xml y application/json", ok)

@@ -1,40 +1,62 @@
 # Python_app
 
-App de escritorio en Python (Tkinter + ttk) para la librería en línea. Permite iniciar sesión, registrar cuentas y gestionar el catálogo de libros (CRUD) contra los microservicios del proyecto.
+App de escritorio en Python (Tkinter + ttk) para la librería en línea: cliente de los 6 microservicios del
+proyecto (login, books, users, authors, pedidos y pagos), que corren en la VM.
+
+> **Parte 1 (ambiente base):** login y Libros funcionan completos; Autores, Usuarios, Pedidos y Pagos muestran
+> "En construcción" (sus microservicios solo exponen `/health` y `/metrics` todavía).
+> Arquitectura general: [`docs/ARQUITECTURA.md`](../../docs/ARQUITECTURA.md).
 
 ## Características
 
-- Login y registro contra el microservicio de **auth** (puerto 5000). El JWT que devuelve `POST /login` se guarda solo en memoria.
-- Catálogo de libros en tabla (`Treeview`) con semáforo (verde/rojo) del estado de los servicios, contra el microservicio de **libros** (puerto 5001).
-- CRUD completo de libros: crear (POST), editar (PUT), editar parcial (PATCH), eliminar (DELETE) y buscar (ISBN/título/autor/género). Las escrituras envían `Authorization: Bearer <token>`.
-- Si el servicio de libros responde 401/403 se avisa que la sesión no es válida o expiró y se vuelve al login.
-- Todo el tráfico HTTP (petición y respuesta) se imprime en la consola desde `api_client.py`.
-- Pantalla de **Configuración** para cambiar las URLs de ambos servicios, guardadas en `local_storage.json`.
-- Dependencia externa: `requests` (`pip install -r requirements.txt`).
+- **Login y registro** contra el microservicio de auth. El JWT y el refresh token viven **solo en memoria**.
+- **Sesión:** el JWT dura 20 minutos; la app lo renueva sola a los 17. Si un servicio responde 401 intenta un
+  refresh y repite la petición; si no se puede, regresa al login. Cerrar sesión revoca el token en el servidor.
+- **Menú lateral:** Inicio, Libros, Autores, Usuarios, Pedidos, Pagos, Configuración y Cerrar sesión.
+- **Panel de semáforos** siempre visible con los 6 servicios: verde si `GET /health` responde 200 con
+  `status: "ok"`, rojo en cualquier otro caso. Se revisa cada 10 s en hilos (la ventana nunca se congela), tiene
+  botón **Revisar ahora** y, al pasar el mouse, muestra db, redis, tiempo de respuesta y última revisión.
+- **Libros:** tabla con crear (POST), editar (PUT), editar parcial (PATCH), eliminar (DELETE) y buscar.
+  Las escrituras requieren **rol admin**: con otro rol el servicio responde 403 y la app lo explica.
+- **Configuración** (se guarda en `config.json`, sin tokens, y se aplica sin reiniciar):
+  - IP de la VM y puerto de cada servicio.
+  - Protocolo **HTTP (por defecto)** → `http://<IP>:<puerto>`, o **HTTPS** → `https://<IP>/api/<servicio>`.
+  - Con HTTPS: casilla *Verificar certificado* y selector del archivo `.crt`, con advertencia visible si se desactiva.
+  - Intervalo y timeout del semáforo.
+  - *Probar conexión* (prueba los valores del formulario sin guardarlos) y *Restaurar valores por defecto*.
+- **Log HTTP en consola** de cada petición y respuesta, **sin tokens ni contraseñas**.
+- Mensajes claros para 401, 403, 409 y 503. Timeout de 5 segundos por petición.
 
 ## Estructura
 
 ```
 Python_app/
-├── main.py              # Punto de entrada
-├── api_client.py        # Cliente HTTP (requests) hacia auth y libros + log en consola
+├── main.py                 # ventana principal: barra, semáforos, menú lateral, pantallas, renovación del JWT
+├── session.py              # JWT + refresh token en memoria
+├── utils.py                # run_async: red en un hilo, resultado de vuelta con after()
 ├── requirements.txt
-├── storage.py            # Persistencia de configuración (local_storage.json)
-├── utils.py              # Utilidades varias
-└── ui/
-    ├── theme.py          # Paleta, tipografía y estilos ttk
-    ├── login_screen.py
-    ├── register_screen.py
-    ├── config_screen.py
-    ├── catalog_screen.py
-    └── book_form.py
+├── api/
+│   ├── http_base.py        # cliente HTTP base (URL, timeout, Authorization, refresh ante 401, log, errores)
+│   ├── auth_client.py      # login, register, refresh, logout
+│   ├── books_client.py     # CRUD de libros
+│   ├── users_client.py  authors_client.py  pedidos_client.py  pagos_client.py
+│   └── health.py           # revisión de /health para el semáforo
+├── screens/
+│   ├── login_screen.py  register_screen.py  home_screen.py
+│   ├── catalog_screen.py  book_form.py
+│   ├── config_screen.py
+│   └── placeholder_screen.py     # "En construcción"
+├── widgets/
+│   ├── theme.py            # paleta, tipografía y estilos ttk
+│   ├── semaforos.py  sidebar.py  tooltip.py
+├── config/
+│   └── settings.py         # config.json: carga, validación, URL de cada servicio
+└── tests/
+    └── test_cliente.py     # pytest (sin ventana): configuración, cliente HTTP, sesión, semáforo
 ```
 
-## Requisitos previos
-
-- Base de datos PostgreSQL (`library`) creada y con datos.
-- Microservicio de auth corriendo en `http://localhost:5000`.
-- Microservicio de libros corriendo en `http://localhost:5001`.
+`config.json` se crea al guardar la configuración. La primera vez hereda la IP que ya tenías en
+`local_storage.json` (el archivo de la versión anterior, que ya no se usa).
 
 ## Ejecutar
 
@@ -44,8 +66,20 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Lánzala desde una terminal para ver el log de peticiones y respuestas.
+Lánzala desde una terminal para ver el log de peticiones y respuestas. Abre **Configuración** (desde el login o el
+menú lateral), escribe la IP de la VM y pulsa **Guardar**: los semáforos deben ponerse en verde.
 
-Si los servicios no corren en `localhost`, ábrelos desde la pantalla de **Configuración** (accesible desde el login) y ajusta las URLs; se guardan automáticamente para la próxima vez.
+Pruebas:
 
-Para la guía completa (levantar los microservicios, configurar correo, probar el flujo end-to-end y solución de problemas), ver [instrucciones.txt](instrucciones.txt). Para JWT, PATCH y logging ver `instrucciones.txt` y `pruebas.txt` en la raíz del proyecto.
+```
+pip install pytest
+python -m pytest -q tests
+```
+
+## Requisitos previos
+
+Los 6 microservicios levantados en la VM (`scripts/levantar_servicios.sh`, ver `VMComandos.md` en la raíz) y los
+puertos 5000–5005 abiertos hacia tu máquina. Para iniciar sesión necesitas una cuenta confirmada; para modificar
+libros, una con rol admin (el admin inicial se crea con `ADMIN_EMAIL` / `ADMIN_PASSWORD` del `.env` de users).
+
+`instrucciones.txt` describe la versión anterior de la app (2 servicios); se conserva como referencia histórica.

@@ -1,0 +1,9 @@
+En este ejercicio aprendí cómo proteger un servicio con JWT y me di cuenta de que es más útil de lo que pensaba. Al principio me confundía por qué el login tenía que quedar público y solo el servicio de libros protegido, pero después entendí que el login es el que emite el token y el otro servicio nada más lo revisa con el mismo secreto. Ese secreto compartido fue lo que más me hizo click, porque si no es idéntico en los dos servicios, el de libros rechaza todo con un 403 aunque el token sea bueno.
+
+También agregué el PATCH, que sirve para actualizar solo un campo sin mandar todo el libro. Me gustó ver la diferencia contra el PUT cuando cambié solo el stock y lo demás se quedó igual.
+
+Lo más complicado fue la conexión entre mi máquina y la VM. Al principio la app marcaba que no había respuesta y tuve que revisar puertos, firewall y a qué IP apuntaba la app. Ahí me ayudaron mucho los logs en la consola, porque pude ver la petición completa con el método, la URL, los headers y el token Bearer, y con eso entendí que el error era de conexión y no de mis credenciales ni del JWT.
+
+Otra cosa que aprendí es que el 401 y el 403 no significan lo mismo. El 401 es cuando falta el token o viene mal armado, y el 403 es cuando el token existe pero no es válido o ya expiró. Poder forzar ese 403 cambiando el secreto del servicio me sirvió para comprobar que la protección de verdad funciona.
+
+Al final me llevo que la seguridad no es solo agregar código, también hay que probarla y ver qué pasa cuando algo sale mal. Me sirvió bastante para entender cómo se comunican los microservicios entre sí y cómo se controla quién puede modificar los datos.

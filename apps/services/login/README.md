@@ -1,7 +1,7 @@
 # Microservicio de autenticación (`apps/services/login`)
 
 Servicio independiente de registro, login y sesión para la librería en línea.
-Python 3.12 · Flask · psycopg2 · PostgreSQL (base `library`) · Mailpit (SMTP) · Swagger (flasgger).
+Python 3.12 · Flask · psycopg2 · PostgreSQL (base `library`) · Redis (sesiones y revocación) · Mailpit (SMTP) · Swagger (flasgger).
 Puerto **5000**. Todas las respuestas son **XML por defecto** o **JSON** con `?format=json`.
 
 > Guía completa de instalación y verificación de todos los servicios: [`INSTRUCCIONES.txt`](../../../INSTRUCCIONES.txt) en la raíz del repositorio.
@@ -11,10 +11,12 @@ Puerto **5000**. Todas las respuestas son **XML por defecto** o **JSON** con `?f
 | Método | Endpoint | Función |
 |---|---|---|
 | POST | `/register` | Registra un usuario (`pendiente`) y envía el correo de confirmación por Mailpit |
-| POST | `/login` | Verifica credenciales contra PostgreSQL y abre la sesión de Flask |
-| POST | `/logout` | Cierra la sesión (idempotente) |
+| POST | `/login` | Verifica credenciales, abre la sesión (Flask + Redis) y emite JWT de acceso (20 min) + refresh token (7 días) |
+| POST | `/refresh` | Renueva el JWT con el refresh token, que se rota en cada uso |
+| POST | `/logout` | Borra la sesión y el refresh token y revoca el JWT (`jwt:revoked:<jti>`); idempotente |
 | GET | `/session` | Indica si hay una sesión autenticada (`authenticated: true/false`) |
-| GET | `/health` | Estado del servicio y de PostgreSQL (200 / 503) |
+| GET | `/health` | Módulo común: `{"service","status","db","redis","version"}`; 200 solo si PostgreSQL y Redis responden |
+| GET | `/metrics` | Módulo común: peticiones, 4xx/5xx, 401, 403, caché y errores de Redis |
 | GET | `/confirm?token=...` | Confirma la cuenta (`pendiente` → `confirmado`) y redirige a `/confirmed` |
 | GET | `/confirmed?status=...` | Página HTML que confirma visualmente el resultado |
 | GET | `/apidocs/` | Swagger UI (spec en `/apispec_1.json`) |
@@ -52,6 +54,16 @@ Validación automática de todos los endpoints (servicio + PostgreSQL + Mailpit 
 python tests/validar_endpoints.py          # 61 comprobaciones
 ```
 
+Si Redis no está disponible, `/login`, `/refresh` y `/logout` responden `503 REDIS_NO_DISPONIBLE` (fallo seguro).
+Claims del JWT, claves de Redis y TTL: [`docs/ARQUITECTURA.md`](../../../docs/ARQUITECTURA.md).
+
+Pruebas unitarias (no necesitan PostgreSQL ni Redis: usan fakeredis):
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## Decisiones de diseño
 
 - **Contraseña solo como hash, en `usuarios.password_hash`.** No hay tabla de passwords. Se usa **bcrypt (12 rondas)**, el mismo formato que el monolito Node, así una cuenta creada en un servicio inicia sesión en el otro. Las contraseñas en texto plano del seed de demo (`demo1234`) **no** se aceptan aquí.
@@ -69,12 +81,14 @@ app.py            fábrica de la app, Swagger, manejadores de error, puerto 5000
 routes.py         endpoints + documentación Swagger (docstrings YAML)
 responses.py      negociación ?format= y serialización XML/JSON
 validators.py     validación de registro/login (email, nombres, password)
-security.py       bcrypt y tokens
+security.py       bcrypt, tokens y JWT de acceso
+sessions.py       sesiones, refresh tokens y revocación en Redis
 mailer.py         correo de confirmación por SMTP (Mailpit)
 db.py, config.py  conexión a PostgreSQL y variables de entorno
 templates/        confirmed.html
 sql/              auth_module.sql (tabla de tokens), auth_roles.sql (rol auth_user)
-tests/            validar_endpoints.py
+tests/            test_sesiones.py (pytest + fakeredis), validar_endpoints.py (servicio en marcha)
+deploy/           login.service (systemd + gunicorn)
 ```
 
 ## Limitaciones conocidas

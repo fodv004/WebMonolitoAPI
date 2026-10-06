@@ -1,0 +1,20 @@
+# Unidad systemd del microservicio pagos (gunicorn en 0.0.0.0:5005).
+# scripts/levantar_servicios.sh la instala en /etc/systemd/system/pagos.service
+# sustituyendo __USER__ y __REPO_DIR__. El .env del servicio lo carga la app.
+#
+# 1 worker + hilos: los contadores de /metrics viven en memoria del proceso.
+[Unit]
+Description=Library - microservicio pagos (puerto 5005)
+After=network-online.target postgresql.service redis.service valkey.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REPO_DIR__/apps/services/pagos
+ExecStart=__REPO_DIR__/apps/services/pagos/.venv/bin/gunicorn --workers 1 --threads 4 --timeout 30 --bind 0.0.0.0:5005 app:app
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

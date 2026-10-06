@@ -3,33 +3,39 @@ routes.py
 Endpoints del microservicio de autenticacion:
 
   POST /register   registrar usuario (envia correo de confirmacion por Mailpit)
-  POST /login      autenticar, abrir sesion Flask y emitir un JWT (data.token)
-  POST /logout     cerrar sesion
+  POST /login      autenticar, abrir sesion (Flask + Redis) y emitir JWT + refresh token
+  POST /refresh    renovar el JWT con el refresh token (se rota en cada uso)
+  POST /logout     cerrar sesion y revocar el JWT
   GET  /session    consultar la sesion actual
-  GET  /health     estado del servicio y de PostgreSQL
   GET  /confirm    confirmar la cuenta con el token del correo
   GET  /confirmed  pagina que confirma visualmente que la cuenta quedo activada
+
+GET /health y GET /metrics los registra app.py con el modulo comun.
+Si Redis no esta disponible, /login, /refresh y /logout responden 503.
 
 Los docstrings (YAML tras '---') alimentan Swagger UI en /apidocs/.
 """
 import logging
 
-import psycopg2
 from psycopg2 import errors as pg_errors
 from flask import Blueprint, redirect, render_template, request, session, url_for
 
-from config import Config
+from config import Config  # primero: agrega apps/services al path (modulo `common`)
+import sessions
+from common.auth import ADMIN_ROLE_ID, ROLES
+from common.redis_client import get_client
 from db import get_conn
 from mailer import MailError, send_confirmation_email
 from responses import ApiError, resolve_format, success
-from security import (burn_password_check, create_access_token, hash_password, new_token, token_digest,
+from security import (burn_password_check, decode_own_token, hash_password, new_token, token_digest,
                       verify_password)
 from validators import validar_credenciales, validar_registro
 
 log = logging.getLogger(__name__)
 bp = Blueprint("auth", __name__)
 
-USER_COLS = "id_usuario, nombre, apellido_paterno, apellido_materno, correo, es_admin, activo, estado_cuenta"
+USER_COLS = ("id_usuario, nombre, apellido_paterno, apellido_materno, correo, es_admin, activo, "
+             "estado_cuenta, role_id")
 
 
 def _user_data(row):
@@ -39,9 +45,22 @@ def _user_data(row):
         "apellido_paterno": row[2],
         "apellido_materno": row[3],
         "email": row[4],
-        "es_admin": row[5],
+        "es_admin": row[8] == ADMIN_ROLE_ID,
         "estado_cuenta": row[7],
+        "role_id": row[8],
+        "role": ROLES.get(row[8], "cliente"),
     }
+
+
+def _read_optional_payload():
+    """Cuerpo opcional (JSON o formulario); {} si no viene o no es un objeto."""
+    data = request.get_json(silent=True) if request.is_json else request.form.to_dict()
+    return data if isinstance(data, dict) else {}
+
+
+def _bearer_token():
+    partes = request.headers.get("Authorization", "").split()
+    return partes[1] if len(partes) == 2 and partes[0].lower() == "bearer" else None
 
 
 def _read_payload():
@@ -302,11 +321,11 @@ def login():
     """Autenticar al usuario e iniciar sesión
     Verifica email y contraseña contra PostgreSQL (hash bcrypt). Si son
     correctos y la cuenta está `confirmado`, crea la sesión de Flask
-    (cookie firmada `auth_session`) que identifica al usuario en las
-    peticiones siguientes (`/session`, `/logout`) y devuelve en `data.token`
-    un JWT HS256 (claims `user_id`, `email`, `iat`, `exp`; vence en 1 hora)
-    que el microservicio de libros exige en `Authorization: Bearer <token>`
-    para POST, PUT, PATCH y DELETE.
+    (cookie firmada `auth_session`) y la sesión en Redis, y devuelve:
+    `data.token`, un JWT HS256 de 20 minutos (claims `sub`, `user_id`,
+    `role_id`, `role`, `jti`, `iat`, `exp`, `type="access"`) que todos los
+    microservicios exigen en `Authorization: Bearer <token>` para escribir;
+    y `data.refresh_token` (7 días) para renovarlo en `POST /refresh`.
     ---
     tags:
       - Autenticación
@@ -343,9 +362,13 @@ def login():
                 email: ana@correo.com
                 es_admin: false
                 estado_cuenta: confirmado
+                role_id: 2
+                role: cliente
               token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
               token_type: Bearer
-              expires_in: 3600
+              expires_in: 1200
+              refresh_token: 3q2-7wEjv...
+              refresh_expires_in: 604800
           application/xml: |
             <?xml version="1.0" encoding="UTF-8"?>
             <response>
@@ -365,7 +388,9 @@ def login():
                 </user>
                 <token>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</token>
                 <token_type>Bearer</token_type>
-                <expires_in>3600</expires_in>
+                <expires_in>1200</expires_in>
+                <refresh_token>3q2-7wEjv...</refresh_token>
+                <refresh_expires_in>604800</refresh_expires_in>
               </data>
             </response>
       400:
@@ -378,6 +403,10 @@ def login():
           $ref: '#/definitions/Respuesta'
       403:
         description: Credenciales correctas pero la cuenta está pendiente de confirmar o inactiva.
+        schema:
+          $ref: '#/definitions/Respuesta'
+      503:
+        description: Redis no disponible; no se puede abrir la sesión.
         schema:
           $ref: '#/definitions/Respuesta'
     """
@@ -404,16 +433,91 @@ def login():
         raise ApiError(403, "CUENTA_NO_CONFIRMADA",
                        "La cuenta aun no esta confirmada. Abre el enlace que se envio a tu correo.")
 
+    # Sin Redis no hay sesion ni revocacion: el RedisError se convierte en 503 (app.py).
+    tokens = sessions.crear(fila[0], fila[4], fila[8])
+
     session.clear()                      # sesion nueva: evita fijacion de sesion
     session["id_usuario"] = fila[0]
     session.permanent = True
-    return success(formato, 200, "LOGIN_EXITOSO", "Sesión iniciada.", {
-        "authenticated": True,
-        "user": _user_data(fila),
-        "token": create_access_token(fila[0], fila[4]),
-        "token_type": "Bearer",
-        "expires_in": Config.JWT_EXPIRATION_SECONDS,
-    })
+    return success(formato, 200, "LOGIN_EXITOSO", "Sesión iniciada.",
+                   {"authenticated": True, "user": _user_data(fila), **tokens})
+
+
+# ============================================================
+# POST /refresh
+# ============================================================
+@bp.post("/refresh")
+def refresh():
+    """Renovar el JWT de acceso con el refresh token
+    Valida el refresh token en Redis, revalida la cuenta contra PostgreSQL
+    (activa y confirmada; el rol se vuelve a leer) y emite un JWT nuevo.
+    El refresh token es de **un solo uso**: en cada llamada se rota y el
+    anterior deja de servir.
+    ---
+    tags:
+      - Autenticación
+    consumes:
+      - application/json
+      - application/x-www-form-urlencoded
+    produces:
+      - application/xml
+      - application/json
+    parameters:
+      - $ref: '#/parameters/formatParam'
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [refresh_token]
+          properties:
+            refresh_token: {type: string}
+    responses:
+      200:
+        description: Token renovado (mismos campos de token que `/login`).
+        schema:
+          $ref: '#/definitions/Respuesta'
+      400:
+        description: Falta `refresh_token`.
+        schema:
+          $ref: '#/definitions/Respuesta'
+      401:
+        description: Refresh token inválido, expirado, ya usado o de una cuenta desactivada.
+        schema:
+          $ref: '#/definitions/Respuesta'
+      503:
+        description: Redis no disponible.
+        schema:
+          $ref: '#/definitions/Respuesta'
+    """
+    formato = resolve_format()
+    refresh_token = _read_payload().get("refresh_token")
+    if not isinstance(refresh_token, str) or not refresh_token.strip():
+        raise ApiError(400, "VALIDACION", "Los datos enviados no son validos.",
+                       errors=[{"field": "refresh_token", "message": "El refresh_token es obligatorio."}])
+    refresh_token = refresh_token.strip()
+    invalido = ApiError(401, "REFRESH_INVALIDO", "El refresh token no es válido o ya expiró. Inicia sesión de nuevo.")
+
+    referencia = sessions.buscar_refresh(refresh_token)
+    if referencia is None:
+        raise invalido
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {USER_COLS} FROM usuarios WHERE id_usuario = %s AND activo AND estado_cuenta = 'confirmado'",
+                (referencia["user_id"],),
+            )
+            fila = cur.fetchone()
+    if fila is None:
+        sessions.cerrar(referencia["session_id"], referencia["user_id"])   # la cuenta ya no puede operar
+        raise invalido
+
+    tokens = sessions.rotar(refresh_token, fila[4], fila[8])
+    if tokens is None:
+        raise invalido
+    return success(formato, 200, "TOKEN_RENOVADO", "Token renovado.",
+                   {"authenticated": True, "user": _user_data(fila), **tokens})
 
 
 # ============================================================
@@ -422,8 +526,12 @@ def login():
 @bp.post("/logout")
 def logout():
     """Cerrar la sesión
-    Destruye la sesión de Flask asociada a la cookie. Es idempotente: si no
-    había sesión también responde 200.
+    Con `Authorization: Bearer <token>` (y/o `refresh_token` en el cuerpo)
+    borra de Redis la sesión y su refresh token y agrega el JWT a la lista
+    de revocación (`jwt:revoked:<jti>`) hasta que expire: a partir de ese
+    momento todos los microservicios lo rechazan con 401. También destruye
+    la sesión de Flask de la cookie. Es idempotente: si no había sesión
+    también responde 200.
     ---
     tags:
       - Autenticación
@@ -452,9 +560,27 @@ def logout():
               <message>Sesión cerrada.</message>
               <data><authenticated>false</authenticated></data>
             </response>
+      503:
+        description: Redis no disponible; no se puede garantizar la revocación.
+        schema:
+          $ref: '#/definitions/Respuesta'
     """
     formato = resolve_format()
+    get_client().ping()                  # sin Redis no se puede revocar: 503
     habia_sesion = "id_usuario" in session
+
+    token = _bearer_token()
+    payload = decode_own_token(token) if token else None
+    if payload and payload.get("type") == "access":
+        sessions.revocar_jti(payload.get("jti"), payload.get("exp", 0))
+        habia_sesion = sessions.cerrar(payload.get("sid"), payload.get("user_id")) or habia_sesion
+
+    refresh_token = _read_optional_payload().get("refresh_token")
+    if isinstance(refresh_token, str) and refresh_token.strip():
+        referencia = sessions.buscar_refresh(refresh_token.strip())
+        if referencia:
+            habia_sesion = sessions.cerrar(referencia["session_id"], referencia["user_id"]) or habia_sesion
+
     session.clear()
     return success(formato, 200, "LOGOUT_EXITOSO",
                    "Sesión cerrada." if habia_sesion else "No había una sesión activa.",
@@ -536,68 +662,3 @@ def current_session():
         return success(formato, 200, "SIN_SESION", "No hay una sesión autenticada.", {"authenticated": False})
     return success(formato, 200, "SESION_ACTIVA", "Hay una sesión autenticada.",
                    {"authenticated": True, "user": _user_data(fila)})
-
-
-# ============================================================
-# GET /health
-# ============================================================
-@bp.get("/health")
-def health():
-    """Verificar el estado del microservicio y de PostgreSQL
-    Ejecuta una consulta real (`SELECT 1`) contra la base `library`.
-    Responde 200 si todo funciona y 503 si PostgreSQL no responde.
-    ---
-    tags:
-      - Salud
-    produces:
-      - application/xml
-      - application/json
-    parameters:
-      - $ref: '#/parameters/formatParam'
-    responses:
-      200:
-        description: Servicio y PostgreSQL operativos.
-        schema:
-          $ref: '#/definitions/Respuesta'
-        examples:
-          application/json:
-            status: ok
-            code: SERVICIO_SALUDABLE
-            message: El servicio y PostgreSQL están operativos.
-            data:
-              service: auth
-              database:
-                status: up
-                name: library
-                version: "16.4"
-          application/xml: |
-            <?xml version="1.0" encoding="UTF-8"?>
-            <response>
-              <status>ok</status>
-              <code>SERVICIO_SALUDABLE</code>
-              <message>El servicio y PostgreSQL están operativos.</message>
-              <data>
-                <service>auth</service>
-                <database><status>up</status><name>library</name><version>16.4</version></database>
-              </data>
-            </response>
-      503:
-        description: PostgreSQL no responde.
-        schema:
-          $ref: '#/definitions/Respuesta'
-    """
-    formato = resolve_format()
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.execute("SHOW server_version")
-                version = cur.fetchone()[0].split(" ")[0]
-    except psycopg2.Error:
-        log.exception("Health check: PostgreSQL no responde")
-        raise ApiError(503, "BASE_DE_DATOS_NO_DISPONIBLE", "PostgreSQL no responde.")
-
-    return success(formato, 200, "SERVICIO_SALUDABLE", "El servicio y PostgreSQL están operativos.", {
-        "service": "auth",
-        "database": {"status": "up", "name": Config.DB_NAME, "version": version},
-    })
