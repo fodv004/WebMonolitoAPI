@@ -22,6 +22,7 @@ from flask import Blueprint, Response, jsonify, request
 
 from api.auth_jwt import jwt_requerido
 from common import redis_client, redis_keys
+from common.auth import require_internal_key
 from db.connection import get_connection
 
 rest_bp = Blueprint("rest_api", __name__)
@@ -743,3 +744,75 @@ def eliminar_libro(isbn):
 
     _invalidar_cache_libros(isbn)
     return jsonify({"status": "ok", "mensaje": f"Libro {isbn} eliminado.", "isbn": isbn}), 200
+
+
+# ============================================================
+# 10. Stock para el microservicio pedidos (solo entre servicios,
+#     header X-Internal-Key). El stock real es libros.stock.
+#       POST /books/internal/stock/reservar   resta unidades (409 si no alcanza)
+#       POST /books/internal/stock/liberar    las devuelve
+#     Body: {"items": [{"isbn": "...", "cantidad": 2}]}
+#     Todo o nada: una sola transaccion con las filas bloqueadas
+#     (SELECT ... FOR UPDATE, en orden de isbn).
+# ============================================================
+def _items_de_stock():
+    data = request.get_json(silent=True)
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items:
+        raise ValidacionError("'items' debe ser una lista con al menos un elemento: [{\"isbn\", \"cantidad\"}].")
+    cantidades = {}
+    for item in items:
+        isbn = item.get("isbn") if isinstance(item, dict) else None
+        cantidad = item.get("cantidad") if isinstance(item, dict) else None
+        if not isinstance(isbn, str) or not isbn.strip():
+            raise ValidacionError("Cada item necesita un 'isbn'.")
+        if isinstance(cantidad, bool) or not isinstance(cantidad, int) or cantidad < 1:
+            raise ValidacionError("'cantidad' debe ser un entero mayor o igual a 1.")
+        cantidades[isbn.strip()] = cantidades.get(isbn.strip(), 0) + cantidad
+    return cantidades
+
+
+def _mover_stock(signo):
+    """signo = -1 reserva (resta de libros.stock); signo = +1 libera (suma)."""
+    cantidades = _items_de_stock()
+    isbns = sorted(cantidades)
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT isbn, stock FROM libros WHERE isbn = ANY(%s) ORDER BY isbn FOR UPDATE", (isbns,))
+                actual = dict(cur.fetchall())
+                # Primero se valida todo; si algo falla no se ha cambiado ninguna fila.
+                for isbn in isbns:
+                    if isbn not in actual:
+                        mensaje = f"No existe un libro con ISBN {isbn}."
+                        return jsonify({"error": "LIBRO_NO_ENCONTRADO", "mensaje": mensaje, "message": mensaje,
+                                        "isbn": isbn}), 404
+                    if signo < 0 and actual[isbn] < cantidades[isbn]:
+                        mensaje = (f"Stock insuficiente para el ISBN {isbn}: disponible {actual[isbn]}, "
+                                   f"solicitado {cantidades[isbn]}.")
+                        return jsonify({"error": "STOCK_INSUFICIENTE", "mensaje": mensaje, "message": mensaje,
+                                        "isbn": isbn, "disponible": actual[isbn],
+                                        "solicitado": cantidades[isbn]}), 409
+                for isbn in isbns:
+                    cur.execute("UPDATE libros SET stock = stock + %s WHERE isbn = %s",
+                                (signo * cantidades[isbn], isbn))
+    finally:
+        conn.close()
+
+    for isbn in isbns:
+        _invalidar_cache_libros(isbn)
+    return jsonify({"status": "ok", "items": [{"isbn": isbn, "stock": actual[isbn] + signo * cantidades[isbn]}
+                                              for isbn in isbns]}), 200
+
+
+@rest_bp.route("/books/internal/stock/reservar", methods=["POST"])
+@require_internal_key
+def reservar_stock():
+    return _mover_stock(-1)
+
+
+@rest_bp.route("/books/internal/stock/liberar", methods=["POST"])
+@require_internal_key
+def liberar_stock():
+    return _mover_stock(+1)

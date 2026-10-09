@@ -1076,3 +1076,255 @@ cd "$REPO" && bash scripts/run_tests.sh
 | `409 STOCK_INSUFICIENTE` con stock en la pantalla Libros | El stock vendible es el de **Inventario** (pedidos), no la columna Stock de Libros: cárgalo en Pedidos → Inventario |
 | Los pedidos vencidos no pasan a `EXPIRADO` | `journalctl -u pedidos | grep -i expiracion`: debe decir que la tarea inició; si dice "Redis no disponible", revisa `REDIS_URL`. Espera al menos 1 minuto tras el vencimiento |
 | `403 USUARIO_NO_VALIDO` | La cuenta está desactivada en users |
+
+
+---
+---
+
+# PARTE 5 — Microservicio pagos (pago simulado)
+
+Requisito: Partes 1 a 4 funcionando. Datos de esta VM: base **`library`**, usuario `library_user`, IP pública
+**34.51.0.253**. Corre los bloques en orden y pega la salida en cada **Resultado**.
+
+> Las pruebas de esta parte **no se ejecutaron** al escribirlas: la sección 19 es para correrlas en tu computadora.
+
+## 19. Pruebas en tu computadora (Windows, PowerShell)
+
+No necesitan PostgreSQL, Redis ni ningún servicio levantado.
+
+```powershell
+cd C:\Users\<tu usuario>\Desktop\EG4\apps\services\pagos      # ajusta la ruta del repositorio
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+# 1) Microservicio pagos
+.\.venv\Scripts\python.exe -m pytest -q tests
+
+# 2) Módulo común (cambió el filtro de logs: ahora también oculta "cvv")
+cd ..\common
+..\pagos\.venv\Scripts\python.exe -m pytest -q tests
+
+# 3) App Tk (cliente de pagos, Idempotency-Key, comprobante); no abre ninguna ventana
+cd ..\..\Python_app
+..\services\pagos\.venv\Scripts\python.exe -m pytest -q tests
+```
+
+Para ver el detalle de un fallo: agrega `-x -vv` (se detiene en el primero y muestra el porqué).
+
+**Resultado (pega la última línea de cada corrida, y el detalle si algo falla):**
+
+```
+```
+
+## 20. Desplegar en la VM
+
+```bash
+cd ~/WebMonolitoAPI && export REPO="$(pwd)"       # ajusta la ruta
+DB_URL="$(grep '^DATABASE_URL=' apps/services/pagos/.env | cut -d= -f2-)"
+echo "$DB_URL" | sed -E 's#://([^:]+):[^@]*@#://\1:***@#'       # debe terminar en /library
+
+# 1) Respaldo de la base antes de migrar
+mkdir -p ~/respaldos
+pg_dump "$DB_URL" -Fc -f ~/respaldos/library_antes_parte5_$(date +%F_%H%M).dump
+ls -lh ~/respaldos | tail -2
+
+# 2) Código nuevo
+git pull && git log --oneline -3
+
+# 3) pagos habla con pedidos por sus endpoints internos, con la clave interna
+grep -q '^PEDIDOS_URL=' apps/services/pagos/.env || echo 'PEDIDOS_URL=http://127.0.0.1:5004' >> apps/services/pagos/.env
+grep '^PEDIDOS_URL=' apps/services/pagos/.env
+cat apps/services/pagos/.env apps/services/pedidos/.env | grep '^INTERNAL_API_KEY=' | sort -u | wc -l     # esperado: 1
+
+# 4) Dependencias, migración 001_pagos.sql y reinicio de los 6 servicios
+bash scripts/levantar_servicios.sh
+
+# 5) Verificación
+psql "$DB_URL" -c '\d pagos'
+psql "$DB_URL" -c "SELECT version, aplicada_en FROM schema_migraciones ORDER BY aplicada_en;"     # incluye 007_pagos
+sudo journalctl -u pagos -n 20 --no-pager | grep -i 'sincronizacion'       # "Tarea de sincronizacion de pagos iniciada"
+bash scripts/estado_servicios.sh
+```
+
+Si el `.env` de pagos no apunta a la base `library`:
+`sed -i 's#/library_db$#/library#' apps/services/pagos/.env && sudo systemctl restart pagos`.
+
+Si necesitaras restaurar el respaldo: `pg_restore --clean --if-exists -d "$DB_URL" ~/respaldos/<archivo>.dump`.
+
+**Resultado:**
+
+```
+```
+
+---
+
+## 21. Comprobación de la Parte 5 (curl)
+
+Desde tu computadora (Git Bash) con la IP pública, o dentro de la VM cambiando `H=127.0.0.1`.
+Usa la misma terminal para todo el punto 21.
+
+```bash
+H=34.51.0.253                                   # dentro de la VM: H=127.0.0.1
+PEDIDOS=http://$H:5004; PAGOS=http://$H:5005
+json() { python3 -c "import sys,json; d=json.load(sys.stdin); print(d$1)"; }     # en Windows: usa python en vez de python3
+llave() { python3 -c "import uuid; print(uuid.uuid4())"; }
+entrar() {   # entrar CORREO -> deja el JWT en $TOKEN
+    local pass; read -r -s -p "Contraseña de $1: " pass; echo
+    TOKEN="$(curl -s -X POST "http://$H:5000/login?format=json" -H 'Content-Type: application/json' \
+              -d "{\"email\":\"$1\",\"password\":\"$pass\"}" | json '["data"]["token"]')"
+}
+stock() { curl -s "$PEDIDOS/inventario/$1" | json '["stock_disponible"], "disponible /", d["stock_reservado"], "reservado"'; }
+entrar admin@libreria.com;      ADMIN=(-H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json')
+entrar maruchanvalo@gmail.com;  CLI=(-H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json')
+ISBN="$(curl -s "http://$H:5001/books?format=json" | json '[0]["isbn"]')"; echo "ISBN de prueba: $ISBN"
+curl -s -o /dev/null -w 'stock de prueba -> %{http_code}\n' -X PUT "$PEDIDOS/inventario/$ISBN" "${ADMIN[@]}" -d '{"stock_disponible": 10}'
+stock "$ISBN"                                   # 10 disponible / 0 reservado
+```
+
+### 21.1 Crear un pedido, pagarlo y verlo en PAGADO
+
+```bash
+PID="$(curl -s -X POST "$PEDIDOS/pedidos" "${CLI[@]}" -d "{\"lineas\":[{\"isbn\":\"$ISBN\",\"cantidad\":2}]}" | json '["id"]')"
+curl -s "$PEDIDOS/pedidos/$PID" "${CLI[@]}" | json '["estado"], "total", d["total"]'       # PENDIENTE_PAGO
+stock "$ISBN"                                   # 8 disponible / 2 reservado
+
+K1="$(llave)"
+# El "monto": 1 va a propósito: el servidor debe IGNORARLO y cobrar el total del pedido
+R="$(curl -s -w '\n%{http_code}' -X POST "$PAGOS/pagos" "${CLI[@]}" -H "Idempotency-Key: $K1" \
+      -d "{\"pedido_id\":$PID,\"metodo\":\"TARJETA_SIMULADA\",\"tarjeta\":\"4111111111111111\",\"cvv\":\"123\",\"monto\":1}")"
+echo "$R"; PAGO="$(echo "$R" | head -1 | json '["id"]')"
+curl -s "$PEDIDOS/pedidos/$PID" "${CLI[@]}" | json '["estado"], d["historial"][-1]'        # PAGADO, actor servicio:pagos
+stock "$ISBN"                                   # 8 disponible / 0 reservado (venta confirmada)
+```
+
+**Resultado (esperado: `201`, `estado: APROBADO`, `monto` = total del pedido (no 1), `ultimos4: 1111`,
+`sincronizado: true`; pedido en `PAGADO`):**
+
+```
+```
+
+### 21.2 Reenviar el mismo pago sin que se duplique
+
+```bash
+curl -s -w '\n%{http_code}\n' -X POST "$PAGOS/pagos" "${CLI[@]}" -H "Idempotency-Key: $K1" \
+     -d "{\"pedido_id\":$PID,\"metodo\":\"TARJETA_SIMULADA\",\"tarjeta\":\"4111111111111111\",\"cvv\":\"123\"}"
+curl -s "$PAGOS/pagos/pedido/$PID" "${CLI[@]}" | json '["items"].__len__(), "pago(s) para el pedido"'
+# Con una llave NUEVA tampoco se cobra otra vez: el pedido ya no está pendiente
+curl -s -w ' -> %{http_code}\n' -X POST "$PAGOS/pagos" "${CLI[@]}" -H "Idempotency-Key: $(llave)" \
+     -d "{\"pedido_id\":$PID,\"metodo\":\"EFECTIVO\"}"
+# Sin Idempotency-Key -> 400
+curl -s -o /dev/null -w 'sin Idempotency-Key -> %{http_code}\n' -X POST "$PAGOS/pagos" "${CLI[@]}" -d "{\"pedido_id\":$PID,\"metodo\":\"EFECTIVO\"}"
+```
+
+**Resultado (esperado: `200` con el MISMO `id` y `"repetido": true`; `1 pago(s)`; `409 PEDIDO_NO_PAGABLE`; `400`):**
+
+```
+```
+
+### 21.3 Pagar con una tarjeta terminada en 0000 y ver el rechazo
+
+```bash
+PID2="$(curl -s -X POST "$PEDIDOS/pedidos" "${CLI[@]}" -d "{\"lineas\":[{\"isbn\":\"$ISBN\",\"cantidad\":1}]}" | json '["id"]')"
+curl -s -w '\n%{http_code}\n' -X POST "$PAGOS/pagos" "${CLI[@]}" -H "Idempotency-Key: $(llave)" \
+     -d "{\"pedido_id\":$PID2,\"metodo\":\"TARJETA_SIMULADA\",\"tarjeta\":\"4000000000000000\",\"cvv\":\"123\"}"
+curl -s "$PEDIDOS/pedidos/$PID2" "${CLI[@]}" | json '["estado"]'                           # sigue en PENDIENTE_PAGO
+# Con otra tarjeta y otra llave sí se paga
+curl -s -X POST "$PAGOS/pagos" "${CLI[@]}" -H "Idempotency-Key: $(llave)" \
+     -d "{\"pedido_id\":$PID2,\"metodo\":\"TARJETA_SIMULADA\",\"tarjeta\":\"4242424242424242\",\"cvv\":\"123\"}" | json '["estado"]'
+curl -s "$PAGOS/pagos/pedido/$PID2" "${CLI[@]}" | json '["items"]' | tr ',' '\n' | grep "'estado'"
+```
+
+**Resultado (esperado: `201` con `estado: RECHAZADO` y `ultimos4: 0000`; pedido `PENDIENTE_PAGO`; después `APROBADO`):**
+
+```
+```
+
+### 21.4 Reembolsar como admin y ver el pedido en CANCELADO con el stock liberado
+
+```bash
+stock "$ISBN"                                   # antes del reembolso: 7 disponible / 0 reservado
+# Un cliente no puede reembolsar -> 403
+curl -s -o /dev/null -w 'reembolso como cliente -> %{http_code}\n' -X POST "$PAGOS/pagos/$PAGO/reembolso" "${CLI[@]}"
+curl -s -w '\n%{http_code}\n' -X POST "$PAGOS/pagos/$PAGO/reembolso" "${ADMIN[@]}" -d '{"notas":"Prueba de reembolso"}'
+curl -s "$PEDIDOS/pedidos/$PID" "${CLI[@]}" | json '["estado"], d["historial"][-1]'        # CANCELADO, actor servicio:pagos
+stock "$ISBN"                                   # 9 disponible: regresaron las 2 unidades del pedido
+curl -s -o /dev/null -w 'reembolsar dos veces -> %{http_code}\n' -X POST "$PAGOS/pagos/$PAGO/reembolso" "${ADMIN[@]}"
+```
+
+**Resultado (esperado: `403`; `200` con `estado: REEMBOLSADO`; pedido `CANCELADO`; stock +2; `409`):**
+
+```
+```
+
+### 21.5 Permisos, corrección, borrado y datos de tarjeta
+
+```bash
+# Permisos
+curl -s -o /dev/null -w 'GET /pagos sin token -> %{http_code}\n' "$PAGOS/pagos"
+curl -s "$PAGOS/pagos" "${CLI[@]}" | json '["total"], "pago(s) propios"'
+curl -s "$PAGOS/pagos?estado=RECHAZADO" "${ADMIN[@]}" | json '["total"], "rechazado(s) en total"'
+
+# El admin corrige referencia y notas, pero nunca el monto (400)
+curl -s -w ' -> %{http_code}\n' -X PATCH "$PAGOS/pagos/$PAGO" "${ADMIN[@]}" -d '{"referencia":"REF-MANUAL-1","notas":"Conciliado"}' | tail -c 120
+curl -s -w ' -> %{http_code}\n' -X PATCH "$PAGOS/pagos/$PAGO" "${ADMIN[@]}" -d '{"monto": 1}'
+
+# Borrado lógico: solo los rechazados
+RECH="$(curl -s "$PAGOS/pagos?estado=RECHAZADO" "${ADMIN[@]}" | json '["items"][0]["id"]')"
+curl -s -o /dev/null -w 'eliminar un pago no rechazado -> %{http_code}\n' -X DELETE "$PAGOS/pagos/$PAGO" "${ADMIN[@]}"
+curl -s -o /dev/null -w 'eliminar el rechazado -> %{http_code}\n' -X DELETE "$PAGOS/pagos/$RECH" "${ADMIN[@]}"
+```
+
+En la VM: ni la base ni los logs deben contener números de tarjeta completos ni CVV.
+
+```bash
+psql "$DB_URL" -c "SELECT id, pedido_id, monto, metodo, estado, referencia, ultimos4, sincronizado, activo FROM pagos ORDER BY id;"
+sudo journalctl -u pagos --since '1 hour ago' --no-pager | grep -cE '4111111111111111|4000000000000000|4242424242424242'   # esperado: 0
+sudo journalctl -u pagos -n 8 --no-pager                                                  # solo método, ruta, status y tiempo
+if command -v valkey-cli >/dev/null; then RC=valkey-cli; else RC=redis-cli; fi
+read -r -s -p "Contraseña de Redis: " REDISCLI_AUTH; export REDISCLI_AUTH; echo
+$RC -h 127.0.0.1 --scan --pattern 'pago:*'                                                # pago:idem:<llave>
+$RC -h 127.0.0.1 ttl "pago:idem:$K1"                                                      # cerca de 86400
+```
+
+**Resultado (esperado: `401`; totales; `200`; `400`; `409`; `200`; tabla con `ultimos4` y sin tarjetas; `0`):**
+
+```
+```
+
+### 21.6 App Tk
+
+En tu máquina: `cd apps\Python_app`, `python main.py`, y en **Configuración** pon la IP `34.51.0.253`.
+
+1. Entra como **cliente**, abre **Pedidos**, crea un pedido y selecciónalo en *Mis pedidos*. El botón **Ir a pagar**
+   ya está activo: púlsalo. Se abre **Pagos** con ese pedido elegido y su total en grande.
+2. Elige *Tarjeta (simulada)*: aparecen *Número* y *CVV*, enmascarados. Escribe `4111 1111 1111 1111` y `123` y pulsa
+   **Pagar**. Debe mostrarse el comprobante (referencia y `•••• 1111`), el pedido desaparece del selector y el pago
+   aparece en verde en el historial. En **Pedidos** ese pedido queda en verde, *PAGADO*.
+3. Crea otro pedido y págalo con una tarjeta terminada en `0000`: comprobante *RECHAZADO* y fila en rojo; el pedido
+   sigue en el selector. Cambia a *Efectivo* (los campos de tarjeta desaparecen) y paga: *APROBADO*.
+4. Usa los filtros de *Estado* y *Método* del historial.
+5. Revisa la terminal desde la que lanzaste la app: en el log de `POST .../pagos` deben verse `"tarjeta": "********"`
+   y `"cvv": "********"`, y el header `Idempotency-Key`.
+6. Entra como **admin** → **Pagos**: selecciona un pago aprobado → **Reembolsar** (pide confirmación); queda en gris,
+   *REEMBOLSADO*, y el pedido en *CANCELADO*. Prueba **Corregir referencia / notas** y **Eliminar rechazado**.
+7. En la VM: `sudo systemctl stop pagos`. En ≤ 10 s el semáforo de Pagos pasa a rojo y la pantalla se cubre con
+   *Servicio de pagos no disponible*. `sudo systemctl start pagos`: vuelve sola.
+
+**Resultado (qué viste en cada paso):**
+
+```
+```
+
+## 22. Si algo falla en la Parte 5
+
+| Síntoma | Qué revisar |
+|---|---|
+| `500` y `relation "pagos" does not exist` en `journalctl -u pagos` | No corrió la migración: `psql "$DB_URL" -v ON_ERROR_STOP=1 -f apps/services/pagos/sql/001_pagos.sql` |
+| `/health` de pagos con `"db": "error"` | `DATABASE_URL` del `.env` de pagos: debe terminar en `/library` |
+| Pagar responde `503 PEDIDOS_NO_DISPONIBLE` | `PEDIDOS_URL` en el `.env` de pagos; `INTERNAL_API_KEY` igual en pagos y pedidos; `systemctl status pedidos` |
+| Pagar responde `409 PAGO_EN_PROCESO` | Hay otro pago del mismo pedido en curso; el lock caduca solo en 30 s |
+| Un pago queda `APROBADO` con `sincronizado: false` | pedidos no respondió al confirmarlo. La tarea lo reintenta cada minuto: `journalctl -u pagos | grep -i sincroniz` |
+| Un pago aparece `REEMBOLSADO` con la nota "Reembolso automático" | El pedido expiró o se canceló antes de poder confirmarle el pago |
+| Reembolsar responde `409 PEDIDO_NO_CANCELABLE` | El pedido ya está `ENVIADO` o `ENTREGADO` |
+| Pagar responde `403` | El pedido no es del usuario del token (ni el admin paga pedidos ajenos) |

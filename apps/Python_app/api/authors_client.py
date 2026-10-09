@@ -26,11 +26,11 @@ class AuthorsClient(ServiceClient):
         return self._http.get(f"/authors/{author_id}")
 
     def books(self, author_id):
-        """{"author_id", "enriquecido", "books": [{"isbn", "orden", "titulo"}]}."""
+        """{"id_autor", "enriquecido", "books": [{"isbn", "titulo"}]}."""
         return self._http.get(f"/authors/{author_id}/books")
 
     def by_book(self, isbn):
-        """{"isbn", "authors": [...]} con los autores de un libro, en su orden."""
+        """{"isbn", "authors": [{id_autor, nombre, nacionalidad}]} con los autores de un libro."""
         return self._http.get(f"/authors/by-book/{self._isbn(isbn)}")
 
     # ------------------------------------------------------------ escrituras (admin)
@@ -38,7 +38,7 @@ class AuthorsClient(ServiceClient):
         return self._http.post("/authors", campos)
 
     def update(self, author_id, **campos):
-        """PUT: reemplaza todos los campos del autor."""
+        """PUT: reemplaza nombre y nacionalidad."""
         return self._http.put(f"/authors/{author_id}", campos)
 
     def patch(self, author_id, **campos):
@@ -48,11 +48,8 @@ class AuthorsClient(ServiceClient):
         """Con libros relacionados el servicio responde 409, salvo force=True."""
         return self._http.delete(f"/authors/{author_id}", params={"force": "true"} if force else None)
 
-    def add_book(self, author_id, isbn, orden=None):
-        cuerpo = {"isbn": isbn}
-        if orden is not None:
-            cuerpo["orden"] = orden
-        return self._http.post(f"/authors/{author_id}/books", cuerpo)
+    def add_book(self, author_id, isbn):
+        return self._http.post(f"/authors/{author_id}/books", {"isbn": isbn})
 
     def remove_book(self, author_id, isbn):
         return self._http.delete(f"/authors/{author_id}/books/{self._isbn(isbn)}")

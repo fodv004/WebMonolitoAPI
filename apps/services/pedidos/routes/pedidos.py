@@ -1,6 +1,6 @@
 """
 routes/pedidos.py
-Endpoints de pedidos e inventario. Solo traducen HTTP <-> services/.
+Endpoints de pedidos. Solo traducen HTTP <-> services/.
 
   POST   /pedidos                        JWT            crea el pedido y reserva el stock
   GET    /pedidos                        JWT            cliente: los suyos; admin: todos (?estado=&user_id=)
@@ -13,17 +13,15 @@ Endpoints de pedidos e inventario. Solo traducen HTTP <-> services/.
   GET    /pedidos/internal/<id>          X-Internal-Key para el servicio pagos
   PATCH  /pedidos/internal/<id>/estado   X-Internal-Key PAGADO | CANCELADO
 
-  GET    /inventario, /inventario/<isbn>          publico
-  POST   /inventario                              JWT + admin
-  PUT    /inventario/<isbn>                       JWT + admin
-  DELETE /inventario/<isbn>                       JWT + admin
+El stock es libros.stock: lo reserva y lo libera books (endpoints internos) y el admin lo
+edita con PATCH /books/<isbn>.
 
 Errores: {"error": "<CODIGO>", "message": "<texto>"} (common/errors.py).
 """
 from flask import Blueprint, g, jsonify, request
 
 from common.auth import ADMIN_ROLE_ID, require_auth, require_internal_key, require_role
-from services import inventario_service, pedidos_service
+from services import pedidos_service
 from services.pedidos_service import Actor
 
 bp = Blueprint("pedidos", __name__)
@@ -98,32 +96,3 @@ def obtener_interno(pedido_id):
 @require_internal_key
 def cambiar_estado_interno(pedido_id):
     return jsonify(pedidos_service.cambiar_estado_interno(pedido_id, _json()))
-
-
-# ------------------------------------------------------------------ inventario
-@bp.get("/inventario")
-def inventario_listar():
-    return jsonify(inventario_service.listar(request.args))
-
-
-@bp.get("/inventario/<isbn>")
-def inventario_obtener(isbn):
-    return jsonify(inventario_service.obtener(isbn))
-
-
-@bp.post("/inventario")
-@solo_admin
-def inventario_crear():
-    return jsonify(inventario_service.crear(_json())), 201
-
-
-@bp.put("/inventario/<isbn>")
-@solo_admin
-def inventario_actualizar(isbn):
-    return jsonify(inventario_service.actualizar(isbn, _json()))
-
-
-@bp.delete("/inventario/<isbn>")
-@solo_admin
-def inventario_eliminar(isbn):
-    return jsonify(inventario_service.eliminar(isbn))

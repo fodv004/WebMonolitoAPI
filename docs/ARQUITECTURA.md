@@ -12,9 +12,9 @@ ya existe (Parte 1, ambiente base) y las convenciones que las siguientes partes 
 | users | `apps/services/users` | 5002 | Completo (Parte 2): usuarios, roles, correos y contraseñas | `usuarios`, `roles` |
 | authors | `apps/services/authors` | 5003 | Completo (Parte 3): autores y su relación con los libros | `authors`, `author_books` |
 | pedidos | `apps/services/pedidos` | 5004 | Completo (Parte 4): pedidos, líneas, inventario y estados | `inventario`, `pedidos`, `pedido_lineas`, `pedido_historial` |
-| pagos | `apps/services/pagos` | 5005 | Esqueleto | `pagos` |
+| pagos | `apps/services/pagos` | 5005 | Completo (Parte 5): pagos simulados y estado de los pedidos | `pagos` |
 | Redis / Valkey | VM | 6379 | Solo en `127.0.0.1`, con contraseña | — |
-| PostgreSQL | VM | 5432 | Base `library_db`, usuario `library_user` | — |
+| PostgreSQL | VM | 5432 | Base `library` (así se llama en la VM), usuario `library_user` | — |
 
 - Los microservicios corren en la VM de GCP (`maquina-01`, CentOS Stream 10) como unidades systemd con gunicorn.
 - La app de escritorio (`apps/Python_app`, Tkinter) corre en la máquina local y consume los 6 servicios.
@@ -190,8 +190,9 @@ por eso `revoke_user_sessions` los alcanza todos.
 | `authors:list:<filtros>`, `authors:<id>`, `authors:<id>:books`, `authors:by-book:<isbn>` | 60 s | `CACHE_TTL` (todas bajo `AUTHORS_PATTERN`) |
 | `pedido:reserva:<pedido_id>` (reserva de stock) | 15 min (`RESERVA_MINUTOS`) | `STOCK_RESERVATION_TTL` |
 | `lock:pedidos:expirar` (`SET NX EX`) | 30 s | `LOCK_TTL` |
-| Idempotencia de pagos | 24 h | `PAYMENT_IDEMPOTENCY_TTL` |
-| Locks | 30 s | `LOCK_TTL` |
+| `pago:idem:<idempotency_key>` (id del pago ya registrado con esa llave) | 24 h | `PAYMENT_IDEMPOTENCY_TTL`, `pago_idem()` |
+| `pago:lock:<pedido_id>` (`SET NX EX`, mientras se paga o reembolsa un pedido) | 30 s | `LOCK_TTL`, `pago_lock()` |
+| `lock:pagos:sync` (`SET NX EX`, tarea de sincronización de pagos) | 30 s | `LOCK_TTL`, `LOCK_SYNC_PAGOS` |
 
 JWT de acceso: 20 minutos (`ACCESS_TOKEN_MINUTES`); renovación proactiva del cliente a los 17.
 Toda clave nueva se agrega **primero** a `redis_keys.py` (función + TTL) y a esta tabla. Detalle operativo en [`REDIS.md`](REDIS.md).
@@ -446,12 +447,100 @@ Pedido en las respuestas:
 `services/clientes_http.py` es el único punto que habla con books y users. Pruebas: `tests/test_pedidos.py` (sin
 base de datos) y `tests/test_integracion_pg.py` (bloqueos y concurrencia real; requiere `TEST_DATABASE_URL`).
 
+## 6 quinquies. Microservicio pagos (puerto 5005)
+
+Registra los pagos de los pedidos y actualiza su estado. **El pago es simulado**: no hay pasarela real.
+Tabla propia (migración `sql/001_pagos.sql`, versión `007_pagos`):
+
+| Columna | Nota |
+|---|---|
+| `id`, `pedido_id`, `user_id` | Sin llaves foráneas: el pedido es de pedidos y el usuario de users |
+| `monto` | Copiado del pedido al pagar. **Nunca** se toma del cliente ni se edita |
+| `metodo` | `TARJETA_SIMULADA`, `TRANSFERENCIA` o `EFECTIVO` |
+| `estado` | `APROBADO`, `RECHAZADO` o `REEMBOLSADO` |
+| `referencia` | `PAG-<fecha>-<8 hex>`; el admin puede corregirla |
+| `ultimos4` | Últimos 4 dígitos de la tarjeta. **El número completo y el CVV no se guardan ni se registran en logs** |
+| `idempotency_key` | `UNIQUE`: respaldo en base de la idempotencia |
+| `sincronizado` | `FALSE` = pago aprobado que pedidos todavía no conoce |
+| `notas`, `activo`, `created_at`, `updated_at` | `activo = false` es el borrado lógico |
+
+Además hay un índice único `uq_pagos_pedido_aprobado`: un pedido no puede tener dos pagos `APROBADO`.
+
+### Endpoints
+
+| Método y ruta | Quién | Descripción |
+|---|---|---|
+| `POST /pagos` | JWT, dueño del pedido | Header **`Idempotency-Key`** obligatorio (8–100 caracteres). Body `{"pedido_id","metodo"}` y, con `TARJETA_SIMULADA`, `"tarjeta"` (13–19 dígitos) y `"cvv"` (3–4). **No lleva monto.** → `201`; si la llave ya se usó → `200` con el mismo pago y `"repetido": true` |
+| `GET /pagos?estado=&metodo=&user_id=&page=&per_page=` | JWT | Cliente: solo los suyos. Admin: todos |
+| `GET /pagos/{id}` | dueño o admin | |
+| `GET /pagos/pedido/{pedido_id}` | dueño o admin | `{"pedido_id","items":[...]}` |
+| `PATCH /pagos/{id}` | admin | Solo `referencia` y `notas`; cualquier otro campo (p. ej. `monto`) → 400 |
+| `POST /pagos/{id}/reembolso` | admin | Body opcional `{"notas"}`. Pago → `REEMBOLSADO`, pedido → `CANCELADO` |
+| `DELETE /pagos/{id}` | admin | Borrado lógico; solo pagos `RECHAZADO` |
+
+Pago en las respuestas (nunca incluye la llave de idempotencia ni datos de tarjeta más allá de `ultimos4`):
+
+```json
+{"id": 12, "pedido_id": 7, "user_id": 31, "monto": 850.5, "metodo": "TARJETA_SIMULADA", "estado": "APROBADO",
+ "referencia": "PAG-20261006-8F3A2C1B", "ultimos4": "1111", "sincronizado": true, "notas": null,
+ "created_at": "2026-10-06T12:00:00", "updated_at": "2026-10-06T12:00:00"}
+```
+
+### Flujo de `POST /pagos`
+
+1. **Idempotencia:** busca `pago:idem:<key>` en Redis y, como respaldo, la columna `idempotency_key`. Si ya existe
+   devuelve el mismo pago sin cobrar otra vez (la llave debe ser del mismo usuario y pedido; si no, `409 LLAVE_YA_USADA`).
+2. **Lock:** `pago:lock:<pedido_id>` con `SET NX EX 30` durante todo el proceso. Si otro proceso lo tiene →
+   `409 PAGO_EN_PROCESO`. **Si Redis está caído → 503** y no se cobra.
+3. **Pedido:** `GET {PEDIDOS_URL}/pedidos/internal/{id}` con `X-Internal-Key`. Debe existir (404), ser del `user_id`
+   del token (403) y estar en `PENDIENTE_PAGO` (`409 PEDIDO_NO_PAGABLE`). El **monto es `total` del pedido**.
+   Si pedidos no responde aquí → `503 PEDIDOS_NO_DISPONIBLE` y no se registra nada.
+4. **Simulación:** una tarjeta terminada en `0000` se rechaza; todo lo demás se aprueba. El pago se guarda
+   (`RECHAZADO` también queda registrado, con `201`).
+5. **Aviso a pedidos (solo si se aprobó):** `PATCH {PEDIDOS_URL}/pedidos/internal/{id}/estado` con
+   `{"estado": "PAGADO"}`. Si pedidos no responde, el pago queda con `sincronizado = false` y la respuesta sigue
+   siendo `201`: lo reintenta la tarea en segundo plano.
+
+Los endpoints internos y los estados de pedidos que usa pagos son exactamente los de la Parte 4
+(`GET /pedidos/internal/{id}`, `PATCH /pedidos/internal/{id}/estado` con `PAGADO` o `CANCELADO`).
+
+### Sincronización y reembolso
+
+- **Tarea de sincronización** (`services/sincronizacion.py`, hilo dentro del servicio): cada 60 s toma
+  `lock:pagos:sync` (`SET NX EX 30`) y reintenta el aviso de los pagos `APROBADO` con `sincronizado = false`, tomando
+  también el lock del pedido. Si al reintentar pedidos responde 409, consulta el pedido: si ya está `PAGADO` (o
+  más adelante) solo marca `sincronizado`; si quedó `CANCELADO` o `EXPIRADO` (la reserva venció mientras pedidos
+  estaba caído) el pago se pasa a `REEMBOLSADO` automáticamente, con una nota. Si Redis no responde, la vuelta se salta.
+- **Reembolso** (`POST /pagos/{id}/reembolso`): con el lock del pedido, pide a pedidos `CANCELADO` (ahí se
+  **libera el stock**) y después marca el pago `REEMBOLSADO`. Si pedidos no responde → 503 y nada cambia. Si el
+  pedido ya está `ENVIADO` o `ENTREGADO` → `409 PEDIDO_NO_CANCELABLE`.
+
+### Errores propios
+
+| Código | HTTP | Caso |
+|---|---|---|
+| `VALIDACION` | 400 | Falta `Idempotency-Key`, método o datos de tarjeta inválidos (el mensaje nunca repite la tarjeta) |
+| `ROL_INSUFICIENTE` | 403 | Pagar un pedido ajeno, consultar pagos ajenos o acciones de admin |
+| `PEDIDO_NO_ENCONTRADO`, `PAGO_NO_ENCONTRADO` | 404 | |
+| `PEDIDO_NO_PAGABLE` | 409 | El pedido no está en `PENDIENTE_PAGO` |
+| `PEDIDO_YA_PAGADO` | 409 | Ya tiene un pago aprobado (aunque aún no esté sincronizado) |
+| `PAGO_EN_PROCESO` | 409 | El lock del pedido lo tiene otra petición |
+| `LLAVE_YA_USADA` | 409 | Esa `Idempotency-Key` pertenece a otro pago |
+| `PAGO_NO_REEMBOLSABLE` / `PAGO_NO_ELIMINABLE` / `PEDIDO_NO_CANCELABLE` | 409 | Reembolsar algo que no está `APROBADO`; eliminar algo que no está `RECHAZADO`; pedido ya enviado |
+| `PEDIDOS_NO_DISPONIBLE` / `REDIS_NO_DISPONIBLE` | 503 | |
+
+### Código
+
+`routes/pagos.py` → `services/pagos_service.py` → `db/repository.py`; `services/pedidos_client.py` es el único
+punto que habla con pedidos. Variable propia: `SINCRONIZACION_AUTOMATICA` (`0` desactiva la tarea).
+Pruebas: `tests/test_pagos.py` (pytest + fakeredis, sin base de datos ni otros servicios).
+
 ## 7. Variables de entorno
 
 | Variable | Servicios | Descripción |
 |---|---|---|
 | `PORT` | todos | Puerto (login y books también aceptan `FLASK_PORT`) |
-| `DATABASE_URL` | users, authors, pedidos, pagos | `postgresql://library_user:<pass>@localhost:5432/library_db` |
+| `DATABASE_URL` | users, authors, pedidos, pagos | `postgresql://library_user:<pass>@localhost:5432/library` |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | login, books | Conexión de los dos servicios anteriores (psycopg2) |
 | `REDIS_URL` | todos | `redis://:<pass>@127.0.0.1:6379/0` |
 | `JWT_SECRET_KEY` | todos | **Mismo valor en los 6.** Obligatoria. Respaldo de compatibilidad: `JWT_SECRET`, luego `SECRET_KEY` |
@@ -462,6 +551,7 @@ base de datos) y `tests/test_integracion_pg.py` (bloqueos y concurrencia real; r
 | `BOOKS_URL`, `USERS_URL`, `AUTHORS_URL`, `PEDIDOS_URL`, `PAGOS_URL` | los que llamen a otro | Por defecto `http://127.0.0.1:<puerto>`. authors usa `BOOKS_URL` para validar ISBN y traer títulos |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | users | Admin inicial (`scripts/crear_admin.py`) |
 | `RESERVA_MINUTOS`, `EXPIRACION_AUTOMATICA` | pedidos | Duración de la reserva de stock (default 15) y tarea de expiración (default activa) |
+| `SINCRONIZACION_AUTOMATICA` | pagos | Tarea que reintenta avisar a pedidos de los pagos sin sincronizar (default activa). Pagos usa además `PEDIDOS_URL` e `INTERNAL_API_KEY` |
 | `LOGIN_URL` | users | Para pedir a login el correo de confirmación (default `http://127.0.0.1:5000`) |
 | `SECRET_KEY`, `SMTP_*`, `MAIL_MODE`, `PUBLIC_BASE_URL`... | login | Cookie de Flask y correo (sin cambios) |
 | `WS_SECURITY_USER`, `WS_SECURITY_PASSWORD_HASH` | books | WS-Security de `/soap` (sin cambios) |
@@ -486,7 +576,7 @@ Para agregar **endpoints** a users, authors, pedidos o pagos solo aplican los pa
 | Carpeta | Contenido |
 |---|---|
 | `api/` | `http_base.py` (cliente base: URL, timeout 5 s, `Authorization` automático, refresh ante 401, log sin secretos), un cliente por servicio y `health.py` |
-| `screens/` | login, registro, inicio, libros (+ formulario), autores, usuarios, pedidos, configuración y "En construcción" |
+| `screens/` | login, registro, inicio, libros (+ formulario), autores, usuarios, pedidos, pagos y configuración |
 | `widgets/` | tema, menú lateral, panel de semáforos, tooltip y `dialogs.py` (formulario modal genérico) |
 | `config/` | `settings.py`: `config.json` (IP, puertos, protocolo, certificado, semáforo). Sin tokens |
 | `session.py` | JWT y refresh token **solo en memoria** |
@@ -501,7 +591,12 @@ Para agregar **endpoints** a users, authors, pedidos o pagos solo aplican los pa
   del autor con un buscador de libros (por ISBN o título) para relacionarlos. Las acciones de admin se ocultan al
   cliente. En **Libros**, la franja de detalle muestra los autores del libro seleccionado (`GET /authors/by-book`).
 - Pantalla **Pedidos** (`screens/pedidos_screen.py`): pestaña *Comprar* (catálogo con stock, carrito y "Mis
-  pedidos" con el estado en color) y, solo para el admin, *Gestión* e *Inventario*. El botón **Ir a pagar** existe
-  pero está deshabilitado: lo conecta la Parte 5 (`ComprarTab.boton_pagar`).
+  pedidos" con el estado en color) y, solo para el admin, *Gestión* e *Inventario*. El botón **Ir a pagar** llama a
+  `app.ir_a_pagar(pedido_id)`, que abre la pantalla Pagos con ese pedido ya elegido.
+- Pantalla **Pagos** (`screens/pagos_screen.py`), tipo caja: selector de pedidos pendientes, monto en grande de solo
+  lectura, método de pago, tarjeta enmascarada (solo con `TARJETA_SIMULADA`), botón *Pagar*, comprobante e historial
+  con filtros; el admin además reembolsa, corrige referencia y notas y elimina rechazados. Cada intento de pago
+  genera un `Idempotency-Key` (uuid4) que **se reutiliza si se reintenta el mismo pago** (mismo pedido, método y
+  tarjeta). La app no guarda el número de tarjeta ni el CVV. Se deshabilita sola con el semáforo de pagos en rojo.
 - Una pantalla nueva recibe `(parent, app)` y usa `app.<cliente>` (`app.users`, `app.pedidos`...), `utils.run_async`
   para no congelar la ventana y `app.sesion_invalida(e)` cuando `e.es_sesion_invalida`.

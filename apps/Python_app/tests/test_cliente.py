@@ -452,3 +452,100 @@ def test_texto_del_pedido_muestra_lineas_vencimiento_e_historial():
     assert "vence" not in texto_del_pedido({**pedido, "estado": "PAGADO"})
     assert set(COLORES_ESTADO) == set(ESTADOS)                              # cada estado tiene su color
     assert COLORES_ESTADO["CANCELADO"] == COLORES_ESTADO["EXPIRADO"]
+
+
+# ------------------------------------------------------------------ cliente de pagos
+def test_pagos_pagar_envia_la_llave_de_idempotencia_y_nunca_el_monto(servidor, config):
+    from api.pagos_client import PagosClient
+
+    pagos = PagosClient(config, _sesion_iniciada(config))
+    servidor.cola += [_respuesta(201, {"id": 1, "estado": "APROBADO"}), _respuesta(201, {"id": 2, "estado": "APROBADO"})]
+    pagos.pay(7, "TARJETA_SIMULADA", "llave-de-prueba-1", tarjeta="4111111111111111", cvv="123")
+    pagos.pay(8, "EFECTIVO", "llave-de-prueba-2", tarjeta="4111111111111111", cvv="123")
+
+    con_tarjeta, sin_tarjeta = (prep for prep, _ in servidor.recibidas)
+    assert con_tarjeta.method == "POST" and con_tarjeta.url.startswith("http://34.51.58.130:5005/pagos?")
+    assert con_tarjeta.headers["Idempotency-Key"] == "llave-de-prueba-1"
+    assert con_tarjeta.headers["Authorization"] == "Bearer jwt-viejo"
+    assert json.loads(con_tarjeta.body) == {"pedido_id": 7, "metodo": "TARJETA_SIMULADA",
+                                            "tarjeta": "4111111111111111", "cvv": "123"}
+    # con otro metodo los datos de tarjeta ni siquiera salen de la app
+    assert json.loads(sin_tarjeta.body) == {"pedido_id": 8, "metodo": "EFECTIVO"}
+    assert sin_tarjeta.headers["Idempotency-Key"] == "llave-de-prueba-2"
+
+
+def test_pagos_rutas_de_consulta_y_de_admin(servidor, config):
+    from api.pagos_client import PagosClient
+
+    pagos = PagosClient(config, _sesion_iniciada(config))
+    servidor.cola += [_respuesta(200, {})] * 8
+    pagos.list(estado="APROBADO", metodo="EFECTIVO", user_id=31)
+    pagos.get(5)
+    pagos.of_order(7)
+    pagos.update(5, referencia="REF-1", notas="")
+    pagos.update(5, notas="Conciliado")
+    pagos.refund(5)
+    pagos.refund(5, notas="Devolución")
+    pagos.delete(5)
+
+    vistas = [(prep.method, prep.url.split(":5005")[1].split("?")[0], json.loads(prep.body) if prep.body else None)
+              for prep, _ in servidor.recibidas]
+    assert vistas == [
+        ("GET", "/pagos", None), ("GET", "/pagos/5", None), ("GET", "/pagos/pedido/7", None),
+        ("PATCH", "/pagos/5", {"referencia": "REF-1", "notas": ""}),
+        ("PATCH", "/pagos/5", {"notas": "Conciliado"}),
+        ("POST", "/pagos/5/reembolso", {}),
+        ("POST", "/pagos/5/reembolso", {"notas": "Devolución"}),
+        ("DELETE", "/pagos/5", None),
+    ]
+    assert all(p in servidor.recibidas[0][0].url for p in ("estado=APROBADO", "metodo=EFECTIVO", "user_id=31"))
+
+
+def test_el_log_de_consola_no_muestra_la_tarjeta_ni_el_cvv(servidor, config, capsys):
+    from api.pagos_client import PagosClient
+
+    servidor.cola.append(_respuesta(201, {"id": 1, "estado": "APROBADO", "ultimos4": "1111", "referencia": "PAG-X"}))
+    PagosClient(config, _sesion_iniciada(config)).pay(7, "TARJETA_SIMULADA", "llave-de-prueba-1",
+                                                      tarjeta="4111111111111111", cvv="7391")
+    consola = capsys.readouterr().out
+    assert "4111111111111111" not in consola and "7391" not in consola
+    assert "POST http://34.51.58.130:5005/pagos" in consola and "Idempotency-Key: llave-de-prueba-1" in consola
+    assert '"ultimos4": "1111"' in consola                      # los ultimos 4 si se pueden ver
+
+
+def test_un_401_al_pagar_renueva_el_token_y_reenvia_la_misma_llave(servidor, config):
+    from api.pagos_client import PagosClient
+
+    servidor.cola += [
+        _respuesta(401, {"error": "TOKEN_EXPIRADO", "message": "El token expiro."}),
+        _respuesta(200, {"data": {"token": "jwt-nuevo", "refresh_token": "rt-nuevo", "expires_in": 1200}}),
+        _respuesta(201, {"id": 1, "estado": "APROBADO"}),
+    ]
+    PagosClient(config, _sesion_iniciada(config)).pay(7, "EFECTIVO", "llave-de-prueba-1")
+    primero, _refresh, reintento = (prep for prep, _ in servidor.recibidas)
+    assert primero.headers["Idempotency-Key"] == reintento.headers["Idempotency-Key"] == "llave-de-prueba-1"
+    assert reintento.headers["Authorization"] == "Bearer jwt-nuevo"
+
+
+def test_mismo_intento_de_pago_misma_huella_y_comprobante():
+    from screens.pagos_screen import firma_del_intento, texto_del_comprobante
+
+    base = firma_del_intento(7, "TARJETA_SIMULADA", "4111 1111 1111 1111", "123")
+    assert base == firma_del_intento(7, "TARJETA_SIMULADA", "4111-1111-1111-1111", " 123 ")    # mismo pago
+    for otro in (firma_del_intento(8, "TARJETA_SIMULADA", "4111111111111111", "123"),          # otro pedido
+                 firma_del_intento(7, "EFECTIVO", "4111111111111111", "123"),                  # otro metodo
+                 firma_del_intento(7, "TARJETA_SIMULADA", "4000000000000000", "123"),          # otra tarjeta
+                 firma_del_intento(7, "TARJETA_SIMULADA", "4111111111111111", "999")):
+        assert otro != base
+    assert "4111" not in base and len(base) == 64               # es un hash: no contiene la tarjeta
+
+    pago = {"id": 1, "pedido_id": 7, "monto": 850.5, "metodo": "TARJETA_SIMULADA", "estado": "APROBADO",
+            "referencia": "PAG-20261006-8F3A2C1B", "ultimos4": "1111", "sincronizado": True, "notas": None,
+            "created_at": "2026-10-06T12:00:00"}
+    texto = texto_del_comprobante(pago)
+    for parte in ("APROBADO", "PAG-20261006-8F3A2C1B", "#7", "$850.50", "•••• 1111", "2026-10-06 12:00"):
+        assert parte in texto
+    assert "rechazado" in texto_del_comprobante({**pago, "estado": "RECHAZADO", "ultimos4": "0000"})
+    assert "en cuanto el servicio de pedidos responda" in texto_del_comprobante({**pago, "sincronizado": False})
+    assert "no se cobró otra vez" in texto_del_comprobante({**pago, "repetido": True})
+    assert "Tarjeta" not in texto_del_comprobante({**pago, "metodo": "EFECTIVO", "ultimos4": None})

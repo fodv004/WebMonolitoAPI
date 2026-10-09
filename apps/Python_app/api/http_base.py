@@ -27,7 +27,7 @@ from config.settings import TIMEOUT_HTTP
 MAX_BODY_LOG = 4000
 
 OCULTO = "********"
-_CAMPOS_OCULTOS = {"password", "password_actual", "password_nueva", "refresh_token", "token", "tarjeta"}
+_CAMPOS_OCULTOS = {"password", "password_actual", "password_nueva", "refresh_token", "token", "tarjeta", "cvv"}
 _HEADERS_OCULTOS = {"authorization", "cookie", "set-cookie", "x-internal-key"}
 _SEPARADOR = "=" * 78
 _SUBSEPARADOR = "-" * 78
@@ -154,12 +154,14 @@ class HttpClient:
         return getattr(self._local, "status", None)
 
     def request(self, method, path, data=None, auth=True, registrar=True, timeout=None, token=None,
-                params=None, _reintento=False):
+                params=None, headers=None, _reintento=False):
         """`auth=False` no envia Authorization. `token` envia ese JWT en lugar del de la
         sesion (y entonces un 401 no dispara la renovacion). `params` son parametros de
-        consulta adicionales (los None se omiten)."""
+        consulta adicionales (los None se omiten) y `headers`, cabeceras adicionales
+        (p. ej. Idempotency-Key)."""
         url = f"{self.base_url}{path}"
-        headers = {"Accept": "application/json"}
+        extra = headers or {}
+        headers = {"Accept": "application/json", **extra}
         renovable = token is None and not _reintento
         if token is None and auth and self.sesion is not None:
             token = self.sesion.token
@@ -198,7 +200,7 @@ class HttpClient:
             # Un solo intento de renovacion; si funciona se repite la peticion con el token nuevo.
             if self.sesion.renovar(token):
                 return self.request(method, path, data, auth=auth, registrar=registrar,
-                                    timeout=timeout, params=params, _reintento=True)
+                                    timeout=timeout, params=params, headers=extra, _reintento=True)
 
         if resp.status_code >= 400:
             datos = payload if isinstance(payload, dict) else {}

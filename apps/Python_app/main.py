@@ -33,8 +33,8 @@ from screens.catalog_screen import CatalogScreen
 from screens.config_screen import ConfigScreen
 from screens.home_screen import HomeScreen
 from screens.login_screen import LoginScreen
+from screens.pagos_screen import PagosScreen
 from screens.pedidos_screen import PedidosScreen
-from screens.placeholder_screen import PlaceholderScreen
 from screens.register_screen import RegisterScreen
 from screens.users_screen import UsersScreen
 from session import Session
@@ -96,7 +96,7 @@ class App(tk.Tk):
             "authors": AuthorsScreen(contenedor, self),
             "users": UsersScreen(contenedor, self),
             "pedidos": PedidosScreen(contenedor, self),
-            "pagos": PlaceholderScreen(contenedor, self, "pagos", "Pagos y estado de los pedidos"),
+            "pagos": PagosScreen(contenedor, self),
         }
         for pantalla in self._pantallas.values():
             pantalla.grid(row=0, column=0, sticky="nsew")
@@ -227,6 +227,11 @@ class App(tk.Tk):
         self.semaforos.revisar_ahora()
 
     # ---------------------------------------------------------- navegacion
+    def ir_a_pagar(self, pedido_id):
+        """Desde "Ir a pagar" de Pedidos: abre la pantalla Pagos con ese pedido ya elegido."""
+        self._pantallas["pagos"].preseleccionar(pedido_id)
+        self.mostrar("pagos")
+
     def mostrar(self, nombre):
         if nombre not in _PANTALLAS_PUBLICAS and not self.sesion.activa:
             nombre = "login"

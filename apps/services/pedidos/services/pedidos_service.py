@@ -7,17 +7,18 @@ Estados (cualquier otra transicion -> 409 TRANSICION_INVALIDA):
     PAGADO         -> ENVIADO | CANCELADO
     ENVIADO        -> ENTREGADO
 
-Stock (tabla inventario), siempre dentro de la transaccion y con las filas
-bloqueadas (SELECT ... FOR UPDATE):
-    crear / agregar unidades      disponible -= n, reservado += n   (409 si no alcanza)
-    cancelar o expirar PENDIENTE  disponible += n, reservado -= n
-    PENDIENTE_PAGO -> PAGADO      reservado  -= n                   (venta confirmada)
-    PAGADO -> CANCELADO           disponible += n                   (las unidades regresan)
+Stock: el stock real es libros.stock y lo mueve el microservicio books por sus
+endpoints internos (una transaccion con SELECT ... FOR UPDATE del lado de books):
+    crear / agregar unidades          POST /books/internal/stock/reservar   (409 si no alcanza)
+    cancelar, expirar o quitar unid.  POST /books/internal/stock/liberar
+    pagar                             no mueve stock (ya se resto al reservar)
+Si books no responde al liberar, el cambio de estado NO se aplica (503) y se reintenta.
 
 PostgreSQL es la fuente de verdad. La clave de Redis pedido:reserva:<id>
 (TTL = minutos de reserva) es solo un espejo de la reserva: escribirla o
 borrarla nunca hace fallar una operacion.
 """
+import logging
 from decimal import Decimal
 from math import ceil
 
@@ -27,6 +28,8 @@ from common.errors import ApiError
 from config import settings as cfg
 from db import repository
 from services import clientes_http, validators
+
+log = logging.getLogger(__name__)
 
 PENDIENTE, PAGADO, ENVIADO, ENTREGADO, CANCELADO, EXPIRADO = validators.ESTADOS
 
@@ -103,11 +106,6 @@ def _no_disponible(servicio):
                                  "Intenta mas tarde.")
 
 
-def _sin_stock(isbn, disponible, solicitado):
-    return ApiError(409, "STOCK_INSUFICIENTE",
-                    f"Stock insuficiente para el ISBN {isbn}: disponible {disponible}, solicitado {solicitado}.")
-
-
 # ------------------------------------------------------------------ apoyo
 def _pedido_bloqueado(repo, pedido_id):
     pedido = repo.pedido_get(pedido_id, bloquear=True)
@@ -135,46 +133,59 @@ def _libros_de_books(isbns):
     return libros
 
 
-def _reservar(repo, deltas):
-    """Aplica al inventario el cambio de unidades reservadas por ISBN (positivo = reservar mas,
-    negativo = devolver). Bloquea las filas en orden de isbn y falla con 409 si alguna no alcanza."""
-    deltas = {isbn: d for isbn, d in deltas.items() if d}
-    if not deltas:
+def _items(cantidades):
+    return [{"isbn": isbn, "cantidad": n} for isbn, n in sorted(cantidades.items()) if n > 0]
+
+
+def _reservar_en_books(cantidades):
+    """Resta de libros.stock (books lo hace todo o nada). 409 indicando el ISBN si no alcanza."""
+    items = _items(cantidades)
+    if not items:
         return
-    inventario = repo.inventario_bloquear(deltas)
-    for isbn in sorted(deltas):
-        delta = deltas[isbn]
-        disponible = inventario[isbn]["stock_disponible"] if isbn in inventario else 0
-        if delta > 0 and disponible < delta:
-            raise _sin_stock(isbn, disponible, delta)
-        if isbn in inventario:
-            repo.inventario_ajustar(isbn, disponible=-delta, reservado=delta)
+    try:
+        clientes_http.reservar_stock(items)
+    except clientes_http.StockInsuficiente as e:
+        raise ApiError(409, "STOCK_INSUFICIENTE", e.mensaje)
+    except clientes_http.LibroNoEncontrado as e:
+        raise ApiError(404, "LIBRO_NO_ENCONTRADO", e.mensaje)
+    except clientes_http.ServicioNoDisponible as e:
+        raise _no_disponible(e.servicio)
+
+
+def _liberar_en_books(cantidades):
+    """Devuelve unidades a libros.stock. 503 si books no responde (quien llama no aplica su cambio)."""
+    items = _items(cantidades)
+    if not items:
+        return
+    try:
+        clientes_http.liberar_stock(items)
+    except clientes_http.LibroNoEncontrado:
+        log.warning("Al liberar stock, books ya no tiene alguno de los libros: %s", [i["isbn"] for i in items])
+    except (clientes_http.ServicioNoDisponible, clientes_http.StockInsuficiente):
+        raise _no_disponible("books")
+
+
+def _compensar(cantidades):
+    """Devuelve lo recien reservado cuando el paso siguiente fallo. Nunca lanza."""
+    try:
+        _liberar_en_books(cantidades)
+    except Exception:
+        log.error("No se pudo devolver a books el stock reservado: %s", _items(cantidades))
 
 
 def _cambiar_estado(repo, pedido, nuevo, actor):
-    """Unico lugar donde un pedido cambia de estado: valida la transicion, mueve el stock y
-    deja el rastro en el historial. `pedido` debe venir bloqueado."""
+    """Unico lugar donde un pedido cambia de estado: valida la transicion, devuelve el stock a
+    books si el pedido se cancela o expira, y deja el rastro en el historial. `pedido` debe venir
+    bloqueado. Si books no responde, lanza 503 y la transaccion se deshace."""
     actual = pedido["estado"]
     if nuevo not in TRANSICIONES.get(actual, ()):
         raise _transicion_invalida(actual, nuevo)
 
-    cantidades = {l["isbn"]: l["cantidad"] for l in repo.lineas_get(pedido["id"])}
-    inventario = repo.inventario_bloquear(cantidades)
-    for isbn in sorted(cantidades):
-        if isbn not in inventario:
-            continue                    # el admin quito ese ISBN del inventario: no hay nada que mover
-        n = cantidades[isbn]
-        # min(): nunca se devuelve mas de lo que la fila dice tener reservado.
-        reservado = min(n, inventario[isbn]["stock_reservado"])
-        if actual == PENDIENTE and nuevo in (CANCELADO, EXPIRADO):
-            repo.inventario_ajustar(isbn, disponible=n, reservado=-reservado)
-        elif actual == PENDIENTE and nuevo == PAGADO:
-            repo.inventario_ajustar(isbn, reservado=-reservado)
-        elif actual == PAGADO and nuevo == CANCELADO:
-            repo.inventario_ajustar(isbn, disponible=n)
-
     repo.pedido_cambiar_estado(pedido["id"], nuevo)
     repo.historial_insert(pedido["id"], actual, nuevo, actor)
+    if nuevo in (CANCELADO, EXPIRADO):
+        # Lo ultimo: si esto falla, lo anterior se deshace con la transaccion.
+        _liberar_en_books({l["isbn"]: l["cantidad"] for l in repo.lineas_get(pedido["id"])})
 
 
 def _olvidar_reserva(pedido_id):
@@ -198,12 +209,16 @@ def crear(actor, datos):
                "subtotal": libros[isbn][1] * n} for isbn, n in cantidades.items()]
     total = sum(l["subtotal"] for l in lineas)
 
-    with repository.unit_of_work() as repo:
-        _reservar(repo, cantidades)                              # SELECT ... FOR UPDATE + 409 si no alcanza
-        pedido = repo.pedido_insert(actor.user_id, total, cfg.RESERVA_MINUTOS)
-        repo.lineas_reemplazar(pedido["id"], lineas)
-        repo.historial_insert(pedido["id"], None, PENDIENTE, actor.etiqueta)
-        resultado = _completo(repo, pedido["id"])
+    _reservar_en_books(cantidades)                               # resta de libros.stock; 409 si no alcanza
+    try:
+        with repository.unit_of_work() as repo:
+            pedido = repo.pedido_insert(actor.user_id, total, cfg.RESERVA_MINUTOS)
+            repo.lineas_reemplazar(pedido["id"], lineas)
+            repo.historial_insert(pedido["id"], None, PENDIENTE, actor.etiqueta)
+            resultado = _completo(repo, pedido["id"])
+    except BaseException:
+        _compensar(cantidades)                                   # el pedido no se guardo: se devuelve el stock
+        raise
 
     redis_client.cache_set(redis_keys.pedido_reserva(pedido["id"]),
                            {"user_id": actor.user_id, "expira_en": resultado["expira_en"]}, cfg.RESERVA_SEGUNDOS)
@@ -273,8 +288,10 @@ def editar_lineas(actor, pedido_id, datos, reemplazar):
         if not finales:
             raise validators.invalido("El pedido no puede quedar sin lineas: para eso, cancelalo.")
 
-        _reservar(repo, {isbn: finales.get(isbn, 0) - (actuales[isbn]["cantidad"] if isbn in actuales else 0)
-                         for isbn in set(finales) | set(actuales)})
+        deltas = {isbn: finales.get(isbn, 0) - (actuales[isbn]["cantidad"] if isbn in actuales else 0)
+                  for isbn in set(finales) | set(actuales)}
+        de_mas = {isbn: d for isbn, d in deltas.items() if d > 0}        # unidades que se agregan
+        de_menos = {isbn: -d for isbn, d in deltas.items() if d < 0}     # unidades que se quitan
 
         lineas = []
         for isbn, n in finales.items():
@@ -286,9 +303,16 @@ def editar_lineas(actor, pedido_id, datos, reemplazar):
                 raise ApiError(409, "PEDIDO_MODIFICADO", "El pedido cambio mientras se editaba. Intenta de nuevo.")
             lineas.append({"isbn": isbn, "titulo": titulo, "cantidad": n, "precio_unitario": precio,
                            "subtotal": precio * n})
-        repo.lineas_reemplazar(pedido_id, lineas)
-        repo.pedido_fijar_total(pedido_id, sum(l["subtotal"] for l in lineas))
-        return _completo(repo, pedido_id)
+        _reservar_en_books(de_mas)                               # 409 si no alcanza: nada cambio todavia
+        try:
+            repo.lineas_reemplazar(pedido_id, lineas)
+            repo.pedido_fijar_total(pedido_id, sum(l["subtotal"] for l in lineas))
+            resultado = _completo(repo, pedido_id)
+            _liberar_en_books(de_menos)
+        except BaseException:
+            _compensar(de_mas)
+            raise
+        return resultado
 
 
 # ------------------------------------------------------------------ cambios de estado
@@ -338,12 +362,24 @@ def eliminar(pedido_id):
 
 # ------------------------------------------------------------------ expiracion
 def expirar_vencidos():
-    """Pasa a EXPIRADO los pedidos PENDIENTE_PAGO cuya reserva vencio y libera su stock.
-    Decide con los datos de PostgreSQL (expira_en), no con Redis. Devuelve los ids expirados."""
+    """Pasa a EXPIRADO los pedidos PENDIENTE_PAGO cuya reserva vencio y devuelve su stock a books.
+    Decide con los datos de PostgreSQL (expira_en), no con Redis. Cada pedido va en su propia
+    transaccion: si books no responde, ese pedido se queda pendiente y se reintenta en la
+    siguiente vuelta. Devuelve los ids expirados."""
     with repository.unit_of_work() as repo:
-        ids = repo.pedidos_vencidos()
-        for pedido_id in ids:
-            _cambiar_estado(repo, repo.pedido_get(pedido_id), EXPIRADO, ACTOR_EXPIRACION)
-    for pedido_id in ids:
+        candidatos = repo.pedidos_vencidos()
+    expirados = []
+    for pedido_id in candidatos:
+        try:
+            with repository.unit_of_work() as repo:
+                pedido = repo.pedido_get(pedido_id, bloquear=True)
+                if pedido is None or pedido["estado"] != PENDIENTE or pedido["expira_en"] > repo.ahora():
+                    continue                             # lo pagaron o cancelaron mientras tanto
+                _cambiar_estado(repo, pedido, EXPIRADO, ACTOR_EXPIRACION)
+        except ApiError as e:
+            log.warning("No se pudo expirar el pedido %s (%s); se reintenta en la siguiente vuelta",
+                        pedido_id, e.code)
+            continue
+        expirados.append(pedido_id)
         _olvidar_reserva(pedido_id)
-    return ids
+    return expirados

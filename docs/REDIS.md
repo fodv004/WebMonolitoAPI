@@ -109,9 +109,12 @@ El cliente común (`apps/services/common/redis_client.py`) usa `socket_timeout` 
 | `jwt:revoked:<jti>` | `"1"`: el JWT fue revocado (logout) | vida restante del JWT (≤ 20 min) | login |
 | `books:list:<filtros>` | Catálogo cacheado (`books:list:format=json`, `books:list:format=xml`) | 60 s | books |
 | `books:<isbn>` | Detalle cacheado de un libro | 60 s | books |
-| reserva de stock *(pedidos, siguiente parte)* | — | 15 min | pedidos |
-| idempotencia de pagos *(pagos, siguiente parte)* | — | 24 h | pagos |
-| locks *(siguientes partes)* | — | 30 s | varios |
+| `authors:list:<filtros>`, `authors:<id>`, `authors:<id>:books`, `authors:by-book:<isbn>` | Caché del servicio de autores | 60 s | authors |
+| `pedido:reserva:<pedido_id>` | Espejo de la reserva de stock de un pedido sin pagar | 15 min (`RESERVA_MINUTOS`) | pedidos |
+| `lock:pedidos:expirar` | Lock (`SET NX EX`) de la tarea que expira pedidos | 30 s | pedidos |
+| `pago:idem:<idempotency_key>` | Id del pago ya registrado con esa llave (evita cobrar dos veces) | 24 h | pagos |
+| `pago:lock:<pedido_id>` | Lock (`SET NX EX`) mientras se paga o reembolsa un pedido | 30 s | pagos |
+| `lock:pagos:sync` | Lock (`SET NX EX`) de la tarea que sincroniza pagos con pedidos | 30 s | pagos |
 
 Los nombres y TTL están centralizados en `apps/services/common/redis_keys.py`.
 

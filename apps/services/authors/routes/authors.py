@@ -10,9 +10,10 @@ Endpoints del microservicio authors. Solo traducen HTTP <-> services/authors_ser
   PUT    /authors/<id>                 JWT + admin
   PATCH  /authors/<id>                 JWT + admin
   DELETE /authors/<id>                 JWT + admin  409 si tiene libros, salvo ?force=true
-  POST   /authors/<id>/books           JWT + admin  body {"isbn", "orden"}; valida el ISBN en books
+  POST   /authors/<id>/books           JWT + admin  body {"isbn"}; valida el ISBN en books
   DELETE /authors/<id>/books/<isbn>    JWT + admin
 
+Tablas: autores (id_autor, nombre, nacionalidad) y libro_autor (isbn, id_autor).
 Errores: {"error": "<CODIGO>", "message": "<texto>"} (common/errors.py).
 """
 from flask import Blueprint, jsonify, request

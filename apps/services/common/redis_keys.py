@@ -65,3 +65,17 @@ LOCK_EXPIRAR_PEDIDOS = "lock:pedidos:expirar"     # SET NX EX LOCK_TTL antes de 
 def pedido_reserva(pedido_id):
     """Espejo de la reserva de stock de un pedido PENDIENTE_PAGO (TTL = minutos de reserva)."""
     return f"pedido:reserva:{pedido_id}"
+
+
+# --- microservicio pagos
+LOCK_SYNC_PAGOS = "lock:pagos:sync"               # SET NX EX LOCK_TTL antes de cada vuelta de la sincronizacion
+
+
+def pago_idem(idempotency_key):
+    """Id del pago ya registrado con esa Idempotency-Key (TTL = PAYMENT_IDEMPOTENCY_TTL, 24 h)."""
+    return f"pago:idem:{idempotency_key}"
+
+
+def pago_lock(pedido_id):
+    """Lock (SET NX EX LOCK_TTL) mientras se paga o se reembolsa un pedido."""
+    return f"pago:lock:{pedido_id}"

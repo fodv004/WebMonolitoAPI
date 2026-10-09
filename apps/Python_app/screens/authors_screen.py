@@ -22,14 +22,13 @@ MAX_RESULTADOS = 30
 
 _COLUMNAS = [
     # (clave, encabezado, ancho, ancla)
-    ("id", "ID", 45, "center"),
-    ("autor", "Autor", 220, "w"),
-    ("nacionalidad", "Nacionalidad", 110, "w"),
-    ("nacimiento", "Nacimiento", 90, "center"),
+    ("id_autor", "ID", 45, "center"),
+    ("autor", "Autor", 240, "w"),
+    ("nacionalidad", "Nacionalidad", 130, "w"),
     ("libros", "Libros", 55, "center"),
 ]
-_CAMPOS = [("nombre", "Nombre"), ("apellido", "Apellido"), ("nacionalidad", "Nacionalidad"),
-           ("fecha_nacimiento", "Nacimiento (AAAA-MM-DD)"), ("biografia", "Biografía")]
+# Columnas de la tabla autores (id_autor, nombre, nacionalidad).
+_CAMPOS = [("nombre", "Nombre"), ("nacionalidad", "Nacionalidad")]
 
 
 class AuthorsScreen(ttk.Frame):
@@ -114,10 +113,9 @@ class AuthorsScreen(ttk.Frame):
         ttk.Label(panel, textvariable=self.datos_var, style="Subtitulo.TLabel", wraplength=305,
                   justify="left").pack(anchor="w", pady=(2, 8))
 
-        self.tabla_libros = ttk.Treeview(panel, columns=("orden", "isbn", "titulo"), show="headings",
+        self.tabla_libros = ttk.Treeview(panel, columns=("isbn", "titulo"), show="headings",
                                          selectmode="browse", height=6)
-        for clave, encabezado, ancho, ancla in (("orden", "#", 30, "center"), ("isbn", "ISBN", 105, "w"),
-                                                ("titulo", "Título", 160, "w")):
+        for clave, encabezado, ancho, ancla in (("isbn", "ISBN", 110, "w"), ("titulo", "Título", 185, "w")):
             self.tabla_libros.heading(clave, text=encabezado, anchor=ancla)
             self.tabla_libros.column(clave, width=ancho, minwidth=30, anchor=ancla, stretch=clave == "titulo")
         self.tabla_libros.pack(fill="x")
@@ -151,9 +149,6 @@ class AuthorsScreen(ttk.Frame):
         self.lista_resultados.pack(fill="x", pady=(4, 6))
         pie = ttk.Frame(self.panel_admin, style="CardInner.TFrame")
         pie.pack(fill="x")
-        ttk.Label(pie, text="Orden", style="Card.TLabel").pack(side="left")
-        self.orden_var = tk.StringVar()
-        ttk.Entry(pie, textvariable=self.orden_var, width=4).pack(side="left", padx=(6, 8))
         self.boton_relacionar = ttk.Button(pie, text="Relacionar", style="Crear.TButton", command=self._relacionar)
         self.boton_relacionar.pack(side="left", fill="x", expand=True)
 
@@ -242,10 +237,10 @@ class AuthorsScreen(ttk.Frame):
         a_seleccionar = None
         for i, autor in enumerate(autores):
             iid = self.tabla.insert("", "end", tags=("par" if i % 2 == 0 else "impar",), values=(
-                autor["id"], autor["nombre_completo"], autor.get("nacionalidad") or "—",
-                autor.get("fecha_nacimiento") or "—", autor.get("total_libros", 0)))
+                autor["id_autor"], autor["nombre"], autor.get("nacionalidad") or "—",
+                autor.get("total_libros", 0)))
             self._por_iid[iid] = autor
-            if autor["id"] == self._seleccion_id:
+            if autor["id_autor"] == self._seleccion_id:
                 a_seleccionar = iid
         if a_seleccionar:
             self.tabla.selection_set(a_seleccionar)      # conserva la seleccion; dispara _al_seleccionar
@@ -264,7 +259,7 @@ class AuthorsScreen(ttk.Frame):
     def _al_seleccionar(self):
         seleccion = self.tabla.selection()
         autor = self._por_iid.get(seleccion[0]) if seleccion else None
-        self._seleccion_id = autor["id"] if autor else None
+        self._seleccion_id = autor["id_autor"] if autor else None
         self._peticion_libros += 1
         self._pintar_libros([])
         if autor is None:
@@ -272,13 +267,11 @@ class AuthorsScreen(ttk.Frame):
             self.datos_var.set("Selecciona un autor de la tabla.")
             self.libros_var.set("")
             return
-        self.autor_var.set(autor["nombre_completo"])
-        biografia = (autor.get("biografia") or "").strip()
-        self.datos_var.set(" · ".join(p for p in (autor.get("nacionalidad"), autor.get("fecha_nacimiento")) if p)
-                           + (f"\n{biografia[:160]}{'…' if len(biografia) > 160 else ''}" if biografia else ""))
+        self.autor_var.set(autor["nombre"])
+        self.datos_var.set(autor.get("nacionalidad") or "Nacionalidad sin registrar")
         self.libros_var.set("Cargando libros...")
         numero = self._peticion_libros
-        run_async(self, lambda: self.app.authors.books(autor["id"]),
+        run_async(self, lambda: self.app.authors.books(autor["id_autor"]),
                   lambda datos: numero == self._peticion_libros and self._recibir_libros(datos),
                   lambda e: numero == self._peticion_libros and self.libros_var.set(
                       f"No se pudieron cargar: {e.mensaje if isinstance(e, ApiError) else e}"))
@@ -298,7 +291,7 @@ class AuthorsScreen(ttk.Frame):
         self.tabla_libros.delete(*self.tabla_libros.get_children())
         for libro in libros:
             self.tabla_libros.insert("", "end", iid=libro["isbn"],
-                                     values=(libro["orden"], libro["isbn"], libro.get("titulo") or "—"))
+                                     values=(libro["isbn"], libro.get("titulo") or "—"))
 
     # ------------------------------------------------------------ admin: autores
     def _valores_de_autor(self, valores):
@@ -310,17 +303,17 @@ class AuthorsScreen(ttk.Frame):
         FormDialog(self.app, "Nuevo autor", "POST /authors — solo el nombre es obligatorio.",
                    [Campo(clave, etiqueta) for clave, etiqueta in _CAMPOS],
                    lambda valores: self.app.authors.create(**self._valores_de_autor(valores)),
-                   lambda a: self._hecho(f"201 Autor creado: {a['nombre_completo']} (ID {a['id']})"),
+                   lambda a: self._hecho(f"201 Autor creado: {a['nombre']} (ID {a['id_autor']})"),
                    texto_boton="Crear", estilo_boton="Crear.TButton")
 
     def _editar(self):
         autor = self._seleccionado()
         if autor is None:
             return
-        FormDialog(self.app, "Editar autor", f"PUT /authors/{autor['id']} — {autor['nombre_completo']}",
+        FormDialog(self.app, "Editar autor", f"PUT /authors/{autor['id_autor']} — {autor['nombre']}",
                    [Campo(clave, etiqueta, valor=autor.get(clave) or "") for clave, etiqueta in _CAMPOS],
-                   lambda valores: self.app.authors.update(autor["id"], **self._valores_de_autor(valores)),
-                   lambda a: self._hecho(f"200 Autor {a['id']} actualizado"), estilo_boton="Editar.TButton")
+                   lambda valores: self.app.authors.update(autor["id_autor"], **self._valores_de_autor(valores)),
+                   lambda a: self._hecho(f"200 Autor {a['id_autor']} actualizado"), estilo_boton="Editar.TButton")
 
     def _eliminar(self):
         autor = self._seleccionado()
@@ -328,14 +321,14 @@ class AuthorsScreen(ttk.Frame):
             return
         libros = autor.get("total_libros", 0)
         if libros:
-            pregunta = (f"{autor['nombre_completo']} tiene {libros} libro(s) relacionado(s).\n\n"
+            pregunta = (f"{autor['nombre']} tiene {libros} libro(s) relacionado(s).\n\n"
                         "¿Eliminar al autor JUNTO CON esas relaciones? (Los libros no se borran.)")
         else:
-            pregunta = f"¿Eliminar a {autor['nombre_completo']}?"
+            pregunta = f"¿Eliminar a {autor['nombre']}?"
         if not messagebox.askyesno("Eliminar autor", pregunta, parent=self.app, icon="warning"):
             return
-        run_async(self, lambda: self.app.authors.delete(autor["id"], force=bool(libros)),
-                  lambda _r: self._hecho(f"200 Autor {autor['nombre_completo']} eliminado"), self._error)
+        run_async(self, lambda: self.app.authors.delete(autor["id_autor"], force=bool(libros)),
+                  lambda _r: self._hecho(f"200 Autor {autor['nombre']} eliminado"), self._error)
 
     # ------------------------------------------------------------ admin: relaciones
     def _quitar(self):
@@ -349,10 +342,10 @@ class AuthorsScreen(ttk.Frame):
         isbn = seleccion[0]
         titulo = next((l.get("titulo") for l in self._libros if l["isbn"] == isbn), None) or isbn
         if not messagebox.askyesno("Quitar relación",
-                                   f"¿Quitar «{titulo}» de los libros de {autor['nombre_completo']}?\n\n"
+                                   f"¿Quitar «{titulo}» de los libros de {autor['nombre']}?\n\n"
                                    "El libro y el autor no se borran.", parent=self.app, icon="warning"):
             return
-        run_async(self, lambda: self.app.authors.remove_book(autor["id"], isbn),
+        run_async(self, lambda: self.app.authors.remove_book(autor["id_autor"], isbn),
                   lambda _r: self._hecho(f"200 Relación con {isbn} eliminada"), self._error)
 
     def _buscar_libro(self):
@@ -389,15 +382,8 @@ class AuthorsScreen(ttk.Frame):
             self.app.set_estado("Busca un libro y selecciónalo en la lista para relacionarlo.", "info")
             return
         libro = self._resultados[seleccion[0]]
-        orden = self.orden_var.get().strip()
-        if orden and (not orden.isdigit() or int(orden) < 1):
-            self.app.set_estado("El orden debe ser un número entero mayor o igual a 1 (o déjalo vacío).", "error")
-            return
 
         def ok(relacion):
-            self.orden_var.set("")
-            self._hecho(f"201 «{relacion.get('titulo') or relacion['isbn']}» relacionado con "
-                        f"{autor['nombre_completo']} (orden {relacion['orden']})")
+            self._hecho(f"201 «{relacion.get('titulo') or relacion['isbn']}» relacionado con {autor['nombre']}")
 
-        run_async(self, lambda: self.app.authors.add_book(autor["id"], libro["isbn"], int(orden) if orden else None),
-                  ok, self._error)
+        run_async(self, lambda: self.app.authors.add_book(autor["id_autor"], libro["isbn"]), ok, self._error)

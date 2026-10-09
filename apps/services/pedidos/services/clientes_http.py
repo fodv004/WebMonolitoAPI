@@ -56,3 +56,51 @@ def libro(isbn):
 
 def usuario(user_id):
     return _get("users", f"{settings.USERS_URL}/users/internal/{int(user_id)}")
+
+
+# ------------------------------------------------------------------ stock (libros.stock, en books)
+class StockInsuficiente(Exception):
+    def __init__(self, mensaje):
+        super().__init__(mensaje)
+        self.mensaje = mensaje
+
+
+class LibroNoEncontrado(Exception):
+    def __init__(self, mensaje):
+        super().__init__(mensaje)
+        self.mensaje = mensaje
+
+
+def _mover_stock(accion, items):
+    """POST {BOOKS_URL}/books/internal/stock/<accion> con {"items": [{"isbn", "cantidad"}]}.
+    books lo aplica todo o nada, en una transaccion con las filas bloqueadas."""
+    try:
+        resp = requests.post(
+            f"{settings.BOOKS_URL}/books/internal/stock/{accion}", json={"items": items}, timeout=TIMEOUT_SEGUNDOS,
+            headers={INTERNAL_KEY_HEADER: settings.INTERNAL_API_KEY, "Accept": "application/json"})
+    except requests.RequestException as e:
+        log.warning("books no responde al %s stock: %s", accion, type(e).__name__)
+        raise ServicioNoDisponible("books")
+    if resp.status_code == 200:
+        return
+    try:
+        datos = resp.json()
+    except ValueError:
+        datos = {}
+    mensaje = (datos.get("message") or datos.get("mensaje") or "") if isinstance(datos, dict) else ""
+    if resp.status_code == 409:
+        raise StockInsuficiente(mensaje or "Stock insuficiente.")
+    if resp.status_code == 404:
+        raise LibroNoEncontrado(mensaje or "Uno de los libros ya no existe en el catalogo.")
+    log.warning("books respondio HTTP %s al %s stock", resp.status_code, accion)
+    raise ServicioNoDisponible("books")
+
+
+def reservar_stock(items):
+    """Resta de libros.stock. StockInsuficiente (409, el mensaje indica el ISBN) si no alcanza."""
+    _mover_stock("reservar", items)
+
+
+def liberar_stock(items):
+    """Devuelve unidades a libros.stock."""
+    _mover_stock("liberar", items)

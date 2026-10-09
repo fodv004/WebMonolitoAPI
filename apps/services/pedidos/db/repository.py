@@ -1,18 +1,14 @@
 """
 db/repository.py
 Acceso a datos del microservicio pedidos (psycopg 3, consultas
-parametrizadas). Tablas propias: inventario, pedidos, pedido_lineas y
-pedido_historial.
+parametrizadas). Tablas propias: pedidos, pedido_lineas y pedido_historial.
 
-Aqui no hay reglas de negocio: solo operaciones pequeñas que
-services/ combina dentro de una transaccion (unit_of_work). Los bloqueos
-(SELECT ... FOR UPDATE) siempre se toman en el mismo orden -primero el
-pedido, despues las filas de inventario ordenadas por isbn- para que dos
-peticiones simultaneas no se bloqueen entre si.
+El stock NO vive aqui: es libros.stock y lo mueve el microservicio books
+(services/clientes_http.py). Aqui no hay reglas de negocio: solo
+operaciones pequeñas que services/ combina dentro de una transaccion.
 """
 from contextlib import contextmanager
 
-from psycopg import errors as pg_errors
 from psycopg.rows import dict_row
 
 from common.db import get_conn
@@ -20,13 +16,6 @@ from common.db import get_conn
 _PEDIDO = "p.id, p.user_id, p.estado, p.total, p.created_at, p.updated_at, p.expira_en"
 _CON_ARTICULOS = (f"{_PEDIDO}, (SELECT COALESCE(SUM(l.cantidad), 0) FROM pedido_lineas l "
                   "WHERE l.pedido_id = p.id) AS articulos")
-_INVENTARIO = "isbn, stock_disponible, stock_reservado, updated_at"
-
-
-class InventarioDuplicado(Exception):
-    pass
-
-
 class PedidosRepository:
     def __init__(self, conn):
         self.conn = conn
@@ -37,46 +26,6 @@ class PedidosRepository:
     def ahora(self):
         """Hora de PostgreSQL (la misma con la que se calcula expira_en)."""
         return self.conn.execute("SELECT NOW()::timestamp").fetchone()[0]
-
-    # ------------------------------------------------------------ inventario
-    def inventario_get(self, isbn):
-        return self._cur().execute(f"SELECT {_INVENTARIO} FROM inventario WHERE isbn = %s", (isbn,)).fetchone()
-
-    def inventario_list(self, limit=100, offset=0):
-        total = self.conn.execute("SELECT COUNT(*) FROM inventario").fetchone()[0]
-        filas = self._cur().execute(
-            f"SELECT {_INVENTARIO} FROM inventario ORDER BY isbn LIMIT %s OFFSET %s", (limit, offset)).fetchall()
-        return filas, total
-
-    def inventario_bloquear(self, isbns):
-        """{isbn: fila} de los ISBN pedidos, BLOQUEADOS (FOR UPDATE) y siempre en orden de isbn."""
-        filas = self._cur().execute(
-            f"SELECT {_INVENTARIO} FROM inventario WHERE isbn = ANY(%s) ORDER BY isbn FOR UPDATE",
-            (sorted(set(isbns)),)).fetchall()
-        return {fila["isbn"]: fila for fila in filas}
-
-    def inventario_ajustar(self, isbn, disponible=0, reservado=0):
-        """Suma (o resta) unidades. La fila debe estar bloqueada; los CHECK impiden negativos."""
-        self.conn.execute(
-            "UPDATE inventario SET stock_disponible = stock_disponible + %s, "
-            "stock_reservado = stock_reservado + %s, updated_at = NOW() WHERE isbn = %s",
-            (disponible, reservado, isbn))
-
-    def inventario_insert(self, isbn, stock_disponible):
-        try:
-            return self._cur().execute(
-                f"INSERT INTO inventario (isbn, stock_disponible) VALUES (%s, %s) RETURNING {_INVENTARIO}",
-                (isbn, stock_disponible)).fetchone()
-        except pg_errors.UniqueViolation:
-            raise InventarioDuplicado()
-
-    def inventario_fijar_disponible(self, isbn, stock_disponible):
-        return self._cur().execute(
-            f"UPDATE inventario SET stock_disponible = %s, updated_at = NOW() WHERE isbn = %s RETURNING {_INVENTARIO}",
-            (stock_disponible, isbn)).fetchone()
-
-    def inventario_delete(self, isbn):
-        return self.conn.execute("DELETE FROM inventario WHERE isbn = %s", (isbn,)).rowcount > 0
 
     # ------------------------------------------------------------ pedidos
     def pedido_insert(self, user_id, total, minutos_de_reserva):

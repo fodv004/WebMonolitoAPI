@@ -144,7 +144,7 @@ class CatalogScreen(ttk.Frame):
                 return
             autores = datos.get("authors", [])
             self.autores_var.set(
-                "  ·  ".join(f"{a['orden']}. {a['nombre_completo']}" + (f" ({a['nacionalidad']})" if a.get("nacionalidad") else "")
+                "  ·  ".join(f"{a['nombre']}" + (f" ({a['nacionalidad']})" if a.get("nacionalidad") else "")
                              for a in autores)
                 if autores else "Sin autores relacionados en el servicio de autores.")
 

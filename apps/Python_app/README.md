@@ -3,8 +3,7 @@
 App de escritorio en Python (Tkinter + ttk) para la librería en línea: cliente de los 6 microservicios del
 proyecto (login, books, users, authors, pedidos y pagos), que corren en la VM.
 
-> **Estado:** login, Libros, Autores, Usuarios y Pedidos funcionan completos; Pagos muestra "En construcción"
-> (su microservicio solo expone `/health` y `/metrics` todavía).
+> **Estado:** las seis pantallas (login, Libros, Autores, Usuarios, Pedidos y Pagos) funcionan completas.
 > Arquitectura general: [`docs/ARQUITECTURA.md`](../../docs/ARQUITECTURA.md).
 
 ## Características
@@ -26,9 +25,19 @@ proyecto (login, books, users, authors, pedidos y pagos), que corren en la VM.
 - **Pedidos** (microservicio pedidos), tipo carrito y seguimiento:
   - *Comprar:* catálogo con el stock disponible, carrito con cantidades editables y total, y "Mis pedidos" con el
     estado en color (pendiente amarillo, pagado verde, enviado azul, entregado gris, cancelado y expirado rojo),
-    el detalle de líneas e historial, y botones para editar, cancelar e "Ir a pagar" (deshabilitado hasta Pagos).
+    el detalle de líneas e historial, y botones para editar, cancelar e "Ir a pagar" (abre Pagos con ese pedido).
   - *Gestión* (admin): todos los pedidos con filtros; marcar enviado o entregado, cancelar y eliminar.
   - *Inventario* (admin): cargar, cambiar y quitar stock por libro.
+- **Pagos** (microservicio pagos), tipo caja. **El pago es simulado**: no uses una tarjeta real.
+  - Selector de tus pedidos pendientes y monto en grande (solo lectura: lo fija el servidor).
+  - Método de pago; con *Tarjeta (simulada)* aparecen el número y el CVV, enmascarados. Una tarjeta terminada en
+    0000 se rechaza.
+  - **Pagar** genera un `Idempotency-Key` y lo reutiliza si reintentas el mismo pago: no se cobra dos veces.
+  - Comprobante con referencia y últimos 4 dígitos, e historial de pagos con filtros.
+  - *Admin:* reembolsar (el pedido pasa a cancelado y se libera su stock), corregir referencia y notas, y eliminar
+    pagos rechazados.
+  - Con el semáforo de Pagos en rojo la pantalla se deshabilita con un aviso.
+  - El número de tarjeta y el CVV no se guardan ni aparecen en el log de consola.
 - **Usuarios** (microservicio users):
   - *Admin:* panel de administración con búsqueda, filtros por rol y estado, paginación, alta y edición, y acciones
     sobre el usuario seleccionado: cambiar rol, restablecer contraseña, cambiar correo y desactivar/reactivar
@@ -65,8 +74,9 @@ Python_app/
 │   ├── authors_screen.py         # Autores y sus libros
 │   ├── users_screen.py           # Usuarios: administración (admin) / Mi perfil (cliente)
 │   ├── pedidos_screen.py         # Pedidos: comprar, gestión e inventario
+│   ├── pagos_screen.py           # Pagos: caja, comprobante e historial
 │   ├── config_screen.py
-│   └── placeholder_screen.py     # "En construcción"
+│   └── placeholder_screen.py     # "En construcción" (ya sin uso; queda como plantilla)
 ├── widgets/
 │   ├── theme.py            # paleta, tipografía y estilos ttk
 │   ├── semaforos.py  sidebar.py  tooltip.py

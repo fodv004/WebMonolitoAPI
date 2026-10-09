@@ -1,6 +1,7 @@
 """
 services/authors_service.py
-Reglas de negocio del microservicio authors (sin Flask).
+Reglas de negocio del microservicio authors (sin Flask), sobre las tablas
+`autores` (id_autor, nombre, nacionalidad) y `libro_autor` (isbn, id_autor).
 
   * Las lecturas son publicas y se cachean 60 s en Redis. Redis es opcional
     aqui: si falla, se consulta PostgreSQL (los cache_* nunca lanzan).
@@ -16,33 +17,27 @@ from common.errors import ApiError
 from db import repository
 from services import books_client, validators
 
-_CAMPOS = ("nombre", "apellido", "nacionalidad", "fecha_nacimiento", "biografia")
+_CAMPOS = ("nombre", "nacionalidad")
 
 
 # ------------------------------------------------------------------ salida
-def _fecha_hora(valor):
-    return valor.isoformat(timespec="seconds") if valor is not None else None
-
-
 def publico(fila):
     """Representacion de un autor en la API."""
     return {
-        "id": fila["id"],
+        "id_autor": fila["id_autor"],
         "nombre": fila["nombre"],
-        "apellido": fila["apellido"],
-        "nombre_completo": " ".join(p for p in (fila["nombre"], fila["apellido"]) if p),
         "nacionalidad": fila["nacionalidad"],
-        "fecha_nacimiento": fila["fecha_nacimiento"].isoformat() if fila["fecha_nacimiento"] else None,
-        "biografia": fila["biografia"],
         "total_libros": fila.get("total_libros", 0),
-        "created_at": _fecha_hora(fila["created_at"]),
-        "updated_at": _fecha_hora(fila["updated_at"]),
     }
 
 
 # ------------------------------------------------------------------ errores
 def _no_encontrado():
     return ApiError(404, "AUTOR_NO_ENCONTRADO", "No existe el autor indicado.")
+
+
+def _libro_no_encontrado(isbn):
+    return ApiError(404, "LIBRO_NO_ENCONTRADO", f"No existe un libro con ISBN {isbn} en el catalogo.")
 
 
 def _books_no_disponible():
@@ -82,12 +77,12 @@ def listar(args):
     return datos
 
 
-def obtener(author_id):
-    clave = redis_keys.author(author_id)
+def obtener(id_autor):
+    clave = redis_keys.author(id_autor)
     datos = redis_client.cache_get(clave)
     if datos is None:
         with repository.unit_of_work() as repo:
-            fila = repo.get(author_id)
+            fila = repo.get(id_autor)
         if fila is None:
             raise _no_encontrado()          # los 404 no se cachean
         datos = publico(fila)
@@ -95,19 +90,19 @@ def obtener(author_id):
     return datos
 
 
-def libros_de(author_id):
+def libros_de(id_autor):
     """Libros del autor con su titulo (de books). Si books falla: solo los ISBN, `enriquecido` = false."""
-    clave = redis_keys.author_books(author_id)
+    clave = redis_keys.author_books(id_autor)
     datos = redis_client.cache_get(clave)
     if datos is not None:
         return datos
 
     with repository.unit_of_work() as repo:
-        if repo.get(author_id) is None:
+        if repo.get(id_autor) is None:
             raise _no_encontrado()
-        relaciones = repo.books_of(author_id)
+        relaciones = repo.books_of(id_autor)
 
-    libros = [{"isbn": r["isbn"], "orden": r["orden"], "titulo": None} for r in relaciones]
+    libros = [{"isbn": r["isbn"], "titulo": None} for r in relaciones]
     enriquecido = True
     if libros:
         try:
@@ -117,7 +112,7 @@ def libros_de(author_id):
         else:
             for libro in libros:
                 libro["titulo"] = titulos.get(libro["isbn"])
-    datos = {"author_id": author_id, "enriquecido": enriquecido, "books": libros}
+    datos = {"id_autor": id_autor, "enriquecido": enriquecido, "books": libros}
     if enriquecido:
         # La respuesta degradada no se cachea: en cuanto books vuelva, vuelven los titulos.
         redis_client.cache_set(clave, datos, redis_keys.CACHE_TTL)
@@ -125,14 +120,14 @@ def libros_de(author_id):
 
 
 def por_libro(isbn):
-    """Autores de un libro, en su orden. No consulta a books: un ISBN sin relaciones devuelve lista vacia."""
+    """Autores de un libro. No consulta a books: un ISBN sin relaciones devuelve lista vacia."""
     isbn = validators.isbn(isbn)
     clave = redis_keys.authors_by_book(isbn)
     datos = redis_client.cache_get(clave)
     if datos is None:
         with repository.unit_of_work() as repo:
             filas = repo.authors_of(isbn)
-        datos = {"isbn": isbn, "authors": [{**publico(fila), "orden": fila["orden"]} for fila in filas]}
+        datos = {"isbn": isbn, "authors": [publico(fila) for fila in filas]}
         redis_client.cache_set(clave, datos, redis_keys.CACHE_TTL)
     return datos
 
@@ -143,11 +138,7 @@ def _campos_validados(datos, parcial):
     for campo in _CAMPOS:
         if campo not in datos and parcial:
             continue
-        valor = datos.get(campo)
-        if campo == "fecha_nacimiento":
-            cambios[campo] = validators.fecha(valor)
-        else:
-            cambios[campo] = validators.texto(campo, valor, obligatorio=campo == "nombre")
+        cambios[campo] = validators.texto(campo, datos.get(campo), obligatorio=campo == "nombre")
     return cambios
 
 
@@ -159,41 +150,40 @@ def crear(datos):
     return publico(fila)
 
 
-def actualizar(author_id, datos, parcial):
-    """PUT (parcial=False: reemplaza todos los campos) y PATCH (solo los enviados)."""
+def actualizar(id_autor, datos, parcial):
+    """PUT (parcial=False: reemplaza nombre y nacionalidad) y PATCH (solo los enviados)."""
     cambios = _campos_validados(_cuerpo(datos), parcial)
     if not cambios:
         raise validators.invalido("No enviaste ningun campo para modificar.")
     with repository.unit_of_work() as repo:
-        if repo.get(author_id, bloquear=True) is None:
+        if repo.get(id_autor, bloquear=True) is None:
             raise _no_encontrado()
-        fila = repo.update(author_id, **cambios)
+        fila = repo.update(id_autor, **cambios)
     _invalidar_cache()
     return publico(fila)
 
 
-def eliminar(author_id, forzar):
+def eliminar(id_autor, forzar):
     with repository.unit_of_work() as repo:
-        fila = repo.get(author_id, bloquear=True)
+        fila = repo.get(id_autor, bloquear=True)
         if fila is None:
             raise _no_encontrado()
         if fila["total_libros"] and not forzar:
             raise ApiError(409, "AUTOR_CON_LIBROS",
                            f"El autor tiene {fila['total_libros']} libro(s) relacionado(s). Quita las relaciones "
                            "o repite la peticion con ?force=true para eliminarlo junto con ellas.")
-        repo.delete(author_id)
+        repo.delete(id_autor)               # borra antes sus filas de libro_autor (ON DELETE RESTRICT)
     _invalidar_cache()
-    return {"status": "ok", "id": author_id, "relaciones_eliminadas": fila["total_libros"],
+    return {"status": "ok", "id_autor": id_autor, "relaciones_eliminadas": fila["total_libros"],
             "message": "Autor eliminado."}
 
 
-def relacionar(author_id, datos):
+def relacionar(id_autor, datos):
     datos = _cuerpo(datos)
     isbn = validators.isbn(datos.get("isbn"))
-    orden = validators.orden(datos.get("orden"))
 
     with repository.unit_of_work() as repo:
-        if repo.get(author_id) is None:
+        if repo.get(id_autor) is None:
             raise _no_encontrado()
     # La consulta a books va fuera de la transaccion: no se retiene una conexion durante la llamada.
     try:
@@ -201,23 +191,25 @@ def relacionar(author_id, datos):
     except books_client.BooksNoDisponible:
         raise _books_no_disponible()
     if libro is None:
-        raise ApiError(404, "LIBRO_NO_ENCONTRADO", f"No existe un libro con ISBN {isbn} en el catalogo.")
+        raise _libro_no_encontrado(isbn)
 
     with repository.unit_of_work() as repo:
-        if repo.get(author_id, bloquear=True) is None:
+        if repo.get(id_autor, bloquear=True) is None:
             raise _no_encontrado()
         try:
-            relacion = repo.add_book(author_id, isbn, orden if orden is not None else repo.next_orden(isbn))
+            relacion = repo.add_book(id_autor, isbn)
         except repository.RelacionDuplicada:
             raise ApiError(409, "RELACION_DUPLICADA", "Ese libro ya esta relacionado con el autor.")
+        except repository.LibroInexistente:
+            raise _libro_no_encontrado(isbn)
     _invalidar_cache()
-    return {"author_id": author_id, **relacion, "titulo": libro.get("titulo")}
+    return {"id_autor": id_autor, **relacion, "titulo": libro.get("titulo")}
 
 
-def quitar_relacion(author_id, isbn):
+def quitar_relacion(id_autor, isbn):
     isbn = validators.isbn(isbn)
     with repository.unit_of_work() as repo:
-        if not repo.remove_book(author_id, isbn):
+        if not repo.remove_book(id_autor, isbn):
             raise ApiError(404, "RELACION_NO_ENCONTRADA", "El autor no tiene relacionado ese libro.")
     _invalidar_cache()
-    return {"status": "ok", "author_id": author_id, "isbn": isbn, "message": "Relacion eliminada."}
+    return {"status": "ok", "id_autor": id_autor, "isbn": isbn, "message": "Relacion eliminada."}

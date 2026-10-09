@@ -1,11 +1,9 @@
 """
 api/pedidos_client.py
 Cliente del microservicio pedidos (apps/services/pedidos, puerto 5004):
-pedidos, lineas, estados e inventario. Todo lo de pedidos exige JWT; el
-inventario se consulta sin token y lo modifica solo el admin.
+pedidos, lineas y estados. Todo exige JWT. El stock no vive aqui: es el
+campo `stock` de cada libro en el microservicio books.
 """
-import urllib.parse
-
 from api.http_base import ServiceClient
 
 
@@ -49,21 +47,3 @@ class PedidosClient(ServiceClient):
     def delete(self, pedido_id):
         """Admin: borrado logico de un pedido CANCELADO o EXPIRADO."""
         return self._http.delete(f"/pedidos/{pedido_id}")
-
-    # ------------------------------------------------------------ inventario
-    @staticmethod
-    def _isbn(isbn):
-        return urllib.parse.quote(isbn, safe="")
-
-    def inventory(self, per_page=500):
-        """[{isbn, stock_disponible, stock_reservado, updated_at}] (publico)."""
-        return self._http.get("/inventario", params={"per_page": per_page}, auth=False).get("items", [])
-
-    def inventory_add(self, isbn, stock_disponible):
-        return self._http.post("/inventario", {"isbn": isbn, "stock_disponible": stock_disponible})
-
-    def inventory_set(self, isbn, stock_disponible):
-        return self._http.put(f"/inventario/{self._isbn(isbn)}", {"stock_disponible": stock_disponible})
-
-    def inventory_remove(self, isbn):
-        return self._http.delete(f"/inventario/{self._isbn(isbn)}")

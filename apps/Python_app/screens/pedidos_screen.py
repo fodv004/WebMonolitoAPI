@@ -10,7 +10,10 @@ Pestaña "Comprar" (todos):
 
 Pestañas solo para el admin:
   "Gestión"     cambiar el estado de cualquier pedido
-  "Inventario"  alta, cambio y baja de stock
+  "Inventario"  editar el stock de cada libro (PATCH /books/<isbn>)
+
+El stock es el de books (libros.stock): pedidos lo reserva al crear un
+pedido y lo libera al cancelarlo o expirar.
 """
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -143,14 +146,10 @@ class PedidosScreen(ttk.Frame):
         self._pestana_actual().recargar()
 
     def catalogo_con_stock(self):
-        """Libros de books unidos con el inventario de pedidos. Se llama desde un hilo."""
+        """Libros de books con su stock (libros.stock). Se llama desde un hilo."""
         libros = self.app.books.list_books()
-        inventario = {fila["isbn"]: fila for fila in self.app.pedidos.inventory()}
         return [{"isbn": l.get("isbn"), "titulo": l.get("titulo") or "—", "precio": float(l.get("precio") or 0),
-                 "disponible": inventario.get(l.get("isbn"), {}).get("stock_disponible", 0),
-                 "reservado": inventario.get(l.get("isbn"), {}).get("stock_reservado", 0),
-                 "en_inventario": l.get("isbn") in inventario,
-                 "actualizado": inventario.get(l.get("isbn"), {}).get("updated_at")}
+                 "disponible": int(l.get("stock") or 0)}
                 for l in (libros if isinstance(libros, list) else [])]
 
 
@@ -248,10 +247,9 @@ class ComprarTab(_Base):
         self.boton_editar.grid(row=0, column=0, sticky="ew", padx=(0, 3))
         self.boton_cancelar = ttk.Button(botones, text="Cancelar", style="Eliminar.TButton", command=self._cancelar)
         self.boton_cancelar.grid(row=0, column=1, sticky="ew", padx=3)
-        self.boton_pagar = ttk.Button(botones, text="Ir a pagar", style="Crear.TButton")
+        self.boton_pagar = ttk.Button(botones, text="Ir a pagar", style="Crear.TButton", command=self._ir_a_pagar)
         self.boton_pagar.grid(row=0, column=2, sticky="ew", padx=(3, 0))
-        self.boton_pagar.state(["disabled"])        # se habilita con el microservicio de pagos (Parte 5)
-        Tooltip(self.boton_pagar, lambda: "El pago se habilita con el microservicio de pagos (Parte 5).")
+        Tooltip(self.boton_pagar, lambda: "Abre la pantalla Pagos con este pedido (solo pedidos pendientes de pago).")
         self._botones_de_pedido()
 
     # ------------------------------------------------------------ datos
@@ -417,8 +415,13 @@ class ComprarTab(_Base):
 
     def _botones_de_pedido(self):
         pendiente = self.pedido is not None and self.pedido["estado"] == "PENDIENTE_PAGO"
-        for boton in (self.boton_editar, self.boton_cancelar):
+        for boton in (self.boton_editar, self.boton_cancelar, self.boton_pagar):
             boton.state(["!disabled"] if pendiente else ["disabled"])
+
+    def _ir_a_pagar(self):
+        """Abre la pantalla Pagos con el pedido seleccionado listo para pagar."""
+        if self.pedido is not None and self.pedido["estado"] == "PENDIENTE_PAGO":
+            self.app.ir_a_pagar(self.pedido["id"])
 
     def _editar(self):
         """Carga el pedido en el carrito; "Guardar cambios" reajusta la reserva de stock."""
@@ -582,37 +585,36 @@ class GestionTab(_Base):
 
 # ====================================================================== INVENTARIO (admin)
 class InventarioTab(_Base):
+    """Stock de cada libro. Es libros.stock, en books: se edita con PATCH /books/<isbn>."""
+
     def __init__(self, parent, pantalla):
         super().__init__(parent, pantalla)
         self._filas = {}
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        marco, self.tabla = _tabla(self, [("isbn", "ISBN", 120, "w", False), ("titulo", "Título", 260, "w", True),
-                                          ("disp", "Disponible", 80, "center", False),
-                                          ("reserv", "Reservado", 80, "center", False),
-                                          ("fecha", "Actualizado", 120, "w", False)])
+        marco, self.tabla = _tabla(self, [("isbn", "ISBN", 130, "w", False), ("titulo", "Título", 320, "w", True),
+                                          ("precio", "Precio", 90, "e", False),
+                                          ("stock", "Stock", 80, "center", False)])
         marco.grid(row=0, column=0, sticky="nsew")
-        self.tabla.tag_configure("sin_fila", foreground=theme.COLOR_TEXTO_SUAVE)
+        self.tabla.tag_configure("agotado", foreground=theme.COLOR_PELIGRO)
         self.tabla.bind("<<TreeviewSelect>>", lambda _e: self._seleccionado())
 
         barra = ttk.Frame(self)
         barra.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(barra, text="ISBN").pack(side="left")
         self.isbn_var = tk.StringVar()
-        ttk.Entry(barra, textvariable=self.isbn_var, width=16).pack(side="left", padx=(6, 12))
-        ttk.Label(barra, text="Stock disponible").pack(side="left")
+        ttk.Entry(barra, textvariable=self.isbn_var, width=16, state="readonly").pack(side="left", padx=(6, 12))
+        ttk.Label(barra, text="Stock").pack(side="left")
         self.stock_var = tk.StringVar()
         entrada = ttk.Entry(barra, textvariable=self.stock_var, width=8)
         entrada.pack(side="left", padx=(6, 12))
         entrada.bind("<Return>", lambda _e: self._guardar())
         ttk.Button(barra, text="Guardar stock", style="Crear.TButton", command=self._guardar).pack(side="left", padx=3)
-        ttk.Button(barra, text="Quitar del inventario", style="Eliminar.TButton", command=self._eliminar).pack(
-            side="left", padx=3)
         ttk.Button(barra, text="Actualizar", command=self.recargar).pack(side="right")
         ttk.Label(self, style="Info.TLabel", justify="left",
-                  text="Selecciona un libro (o escribe su ISBN), pon el stock disponible y pulsa Guardar stock. Los libros "
-                       "en gris aún no están en el inventario. El reservado lo mueven los pedidos pendientes de pago."
+                  text="Selecciona un libro, escribe su stock y pulsa Guardar stock (PATCH /books/<isbn>). Crear un "
+                       "pedido resta de este stock; cancelarlo o dejarlo expirar lo devuelve."
                   ).grid(row=2, column=0, sticky="w", pady=(6, 0))
 
     def recargar(self):
@@ -622,11 +624,8 @@ class InventarioTab(_Base):
             self._filas = {}
             for libro in catalogo:
                 self._filas[libro["isbn"]] = libro
-                self.tabla.insert("", "end", iid=libro["isbn"], tags=() if libro["en_inventario"] else ("sin_fila",),
-                                  values=(libro["isbn"], libro["titulo"],
-                                          libro["disponible"] if libro["en_inventario"] else "—",
-                                          libro["reservado"] if libro["en_inventario"] else "—",
-                                          _fecha(libro["actualizado"]) if libro["en_inventario"] else "sin inventario"))
+                self.tabla.insert("", "end", iid=libro["isbn"], tags=() if libro["disponible"] else ("agotado",),
+                                  values=(libro["isbn"], libro["titulo"], dinero(libro["precio"]), libro["disponible"]))
             if seleccion and self.tabla.exists(seleccion[0]):
                 self.tabla.selection_set(seleccion[0])
 
@@ -637,38 +636,16 @@ class InventarioTab(_Base):
         if seleccion:
             libro = self._filas[seleccion[0]]
             self.isbn_var.set(libro["isbn"])
-            self.stock_var.set(str(libro["disponible"]) if libro["en_inventario"] else "")
+            self.stock_var.set(str(libro["disponible"]))
 
     def _guardar(self):
-        """Alta (POST) si el ISBN aun no esta en el inventario; si ya esta, fija su stock (PUT)."""
         isbn, stock = self.isbn_var.get().strip(), self.stock_var.get().strip()
         if not isbn or not stock.isdigit():
-            self.app.set_estado("Escribe el ISBN y un stock disponible entero (0 o mayor).", "error")
+            self.app.set_estado("Selecciona un libro y escribe un stock entero (0 o mayor).", "error")
             return
-        existe = self._filas.get(isbn, {}).get("en_inventario", False)
-        accion = (lambda: self.app.pedidos.inventory_set(isbn, int(stock))) if existe else \
-                 (lambda: self.app.pedidos.inventory_add(isbn, int(stock)))
 
-        def ok(fila):
-            self.app.set_estado(f"{'200' if existe else '201'} Stock de {isbn}: {fila['stock_disponible']} disponible(s), "
-                                f"{fila['stock_reservado']} reservado(s)", "ok")
+        def ok(_libro):
+            self.app.set_estado(f"200 Stock de {isbn} actualizado a {int(stock)}", "ok")
             self.recargar()
 
-        run_async(self, accion, ok, self._error)
-
-    def _eliminar(self):
-        isbn = self.isbn_var.get().strip()
-        if not isbn:
-            self.app.set_estado("Selecciona o escribe el ISBN a quitar del inventario.", "info")
-            return
-        if not messagebox.askyesno("Quitar del inventario", f"¿Quitar el ISBN {isbn} del inventario?\n\n"
-                                   "El libro seguirá en el catálogo, pero no se podrá vender hasta volver a cargarle stock.",
-                                   parent=self.app, icon="warning"):
-            return
-
-        def ok(_r):
-            self.app.set_estado(f"200 ISBN {isbn} eliminado del inventario", "ok")
-            self.stock_var.set("")
-            self.recargar()
-
-        run_async(self, lambda: self.app.pedidos.inventory_remove(isbn), ok, self._error)
+        run_async(self, lambda: self.app.books.patch_book(isbn, stock=int(stock)), ok, self._error)

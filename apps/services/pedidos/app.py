@@ -2,7 +2,7 @@
 app.py
 Entrypoint del microservicio pedidos (Flask, puerto 5004): crea y gestiona pedidos, líneas de pedido, stock y estados.
 
-Pedidos, lineas, inventario (stock disponible y reservado) y estados.
+Pedidos, lineas y estados. El stock es libros.stock: lo reserva y libera books.
 Usa el modulo compartido apps/services/common; ver docs/ARQUITECTURA.md.
 """
 import sys

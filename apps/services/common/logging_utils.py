@@ -2,7 +2,7 @@
 common/logging_utils.py
 Log HTTP en consola (metodo, ruta, status, tiempo) y filtro que oculta
 datos sensibles en CUALQUIER linea de log: Authorization, password,
-password_actual, password_nueva, refresh_token, token y tarjeta.
+password_actual, password_nueva, refresh_token, token, tarjeta y cvv.
 
 Del request solo se registra la ruta (nunca el query string ni el body):
 /confirm?token=... no debe quedar en el log.
@@ -15,12 +15,12 @@ from flask import g, request
 
 OCULTO = "***"
 CAMPOS_SENSIBLES = ("authorization", "password", "password_actual", "password_nueva",
-                    "refresh_token", "token", "tarjeta")
+                    "refresh_token", "token", "tarjeta", "cvv")
 
 # clave (con o sin comillas) + ":" o "=" + valor (entre comillas, "Bearer xxx" o hasta el separador)
 _PAR_SENSIBLE = re.compile(
     r"""(?ix)
-    ( ["']? (?:authorization | \w*password\w* | \w*token | tarjeta\w*) ["']? \s* [:=] \s* )
+    ( ["']? (?:authorization | \w*password\w* | \w*token | tarjeta\w* | cvv) ["']? \s* [:=] \s* )
     ( "[^"]*" | '[^']*' | (?:bearer\s+)? [^\s,&;}'"]+ )
     """
 )

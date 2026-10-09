@@ -2,7 +2,6 @@
 -- sql/001_pedidos.sql            (migración 006_pedidos)
 -- Tablas propias del microservicio pedidos:
 --
---   inventario        (isbn PK, stock_disponible, stock_reservado, updated_at)
 --   pedidos           (id, user_id, estado, total, created_at, updated_at, expira_en, eliminado_en)
 --   pedido_lineas     (id, pedido_id, isbn, titulo, cantidad, precio_unitario, subtotal)
 --   pedido_historial  (id, pedido_id, estado_anterior, estado_nuevo, actor, fecha)
@@ -11,19 +10,11 @@
 -- de books; se validan por HTTP al crear el pedido. El título y el precio
 -- se COPIAN a pedido_lineas: un pedido no cambia si después cambia el libro.
 --
--- Stock:
---   stock_disponible  unidades que se pueden vender ahora
---   stock_reservado   unidades apartadas por pedidos en PENDIENTE_PAGO
---   crear pedido            disponible -= n, reservado += n
---   cancelar / expirar      disponible += n, reservado -= n
---   pagar                   reservado  -= n   (venta confirmada)
---   cancelar ya pagado      disponible += n   (las unidades regresan)
+-- Stock: NO hay tabla de inventario. El stock real es libros.stock y lo mueve el
+-- microservicio books (POST /books/internal/stock/reservar y /liberar): pedidos
+-- lo llama al crear, cancelar o expirar un pedido.
 --
 -- pedidos.eliminado_en: borrado lógico (DELETE /pedidos/{id}); NULL = visible.
---
--- Carga inicial (solo la primera vez): el inventario nace con el stock que
--- ya tenía cada libro en la tabla `libros` del monolito, si existe. Esa
--- tabla NO se modifica: desde ahora el stock vendible es el de `inventario`.
 --
 -- Ejecutar como library_user, o con scripts/levantar_servicios.sh:
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f 001_pedidos.sql
@@ -38,23 +29,8 @@ CREATE TABLE IF NOT EXISTS schema_migraciones (
     aplicada_en  TIMESTAMP   NOT NULL DEFAULT NOW()
 );
 
-CREATE TEMP TABLE _mig_pedidos_ctx ON COMMIT DROP AS
-SELECT NOT EXISTS (
-           SELECT 1 FROM schema_migraciones WHERE version = '006_pedidos'
-       ) AS pendiente;
-
 -- ------------------------------------------------------------
--- 1. Inventario
--- ------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS inventario (
-    isbn              VARCHAR(13) PRIMARY KEY,          -- sin FK: el libro vive en books
-    stock_disponible  INTEGER   NOT NULL DEFAULT 0 CONSTRAINT chk_inventario_disponible CHECK (stock_disponible >= 0),
-    stock_reservado   INTEGER   NOT NULL DEFAULT 0 CONSTRAINT chk_inventario_reservado  CHECK (stock_reservado >= 0),
-    updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
--- ------------------------------------------------------------
--- 2. Pedidos, líneas e historial
+-- Pedidos, líneas e historial
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS pedidos (
     id            SERIAL PRIMARY KEY,
@@ -95,20 +71,8 @@ CREATE TABLE IF NOT EXISTS pedido_historial (
 
 CREATE INDEX IF NOT EXISTS idx_historial_pedido ON pedido_historial(pedido_id);
 
--- ------------------------------------------------------------
--- 3. Carga inicial del inventario desde libros.stock (si existe la tabla)
--- ------------------------------------------------------------
-DO $$
-BEGIN
-    IF (SELECT pendiente FROM _mig_pedidos_ctx) AND to_regclass('libros') IS NOT NULL THEN
-        INSERT INTO inventario (isbn, stock_disponible)
-        SELECT isbn, GREATEST(stock, 0) FROM libros
-        ON CONFLICT (isbn) DO NOTHING;
-    END IF;
-END $$;
-
 INSERT INTO schema_migraciones (version, descripcion)
-VALUES ('006_pedidos', 'pedidos: inventario, pedidos, pedido_lineas y pedido_historial (inventario inicial desde libros.stock)')
+VALUES ('006_pedidos', 'pedidos: pedidos, pedido_lineas y pedido_historial (el stock es libros.stock, en books)')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

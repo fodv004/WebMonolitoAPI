@@ -136,6 +136,8 @@ def test_database_url_desde_variables_db(monkeypatch):
     ("GET /confirm?token=tok-secreto-2 200", "tok-secreto-2"),
     ('{"tarjeta": "4111111111111111"}', "4111111111111111"),
     ("tarjeta=4111-1111-1111-1111", "4111-1111-1111-1111"),
+    ('{"metodo": "TARJETA_SIMULADA", "cvv": "987"}', "987"),
+    ("cvv=4321&pedido_id=7", "4321"),
     ("reintentando con Bearer abc.def.ghi", "abc.def.ghi"),
 ])
 def test_redact_oculta_datos_sensibles(linea, secreto):
