@@ -1,0 +1,16 @@
+{
+  "host": "34.51.0.253",
+  "protocolo": "http",
+  "puertos": {
+    "login": 5000,
+    "books": 5001,
+    "users": 5002,
+    "authors": 5003,
+    "pedidos": 5004,
+    "pagos": 5005
+  },
+  "verificar_certificado": true,
+  "certificado": "",
+  "semaforo_intervalo_s": 10,
+  "semaforo_timeout_s": 3
+}

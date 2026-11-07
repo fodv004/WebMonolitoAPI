@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 104" width="44" height="104">
+  <!--
+    Camión de carga visto desde arriba, cabina hacia arriba (rumbo 0 = norte).
+    Dibujo original de GPSapp. Color: variable CSS "camion-color" con dos guiones al inicio
+    (por defecto rojo) cuando el SVG se inserta inline en el HTML.
+    Los degradados de volumen son blancos/negros translúcidos, así sirven para cualquier color.
+  -->
+  <defs>
+    <filter id="cam-sombra" x="-30%" y="-15%" width="160%" height="130%">
+      <feGaussianBlur stdDeviation="2.2"/>
+    </filter>
+    <linearGradient id="cam-volumen" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000" stop-opacity=".45"/>
+      <stop offset=".18" stop-color="#000" stop-opacity=".08"/>
+      <stop offset=".42" stop-color="#fff" stop-opacity=".28"/>
+      <stop offset=".58" stop-color="#fff" stop-opacity=".12"/>
+      <stop offset=".84" stop-color="#000" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".5"/>
+    </linearGradient>
+    <linearGradient id="cam-largo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".18"/>
+      <stop offset=".5" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".25"/>
+    </linearGradient>
+    <radialGradient id="cam-brillo-cabina" cx=".35" cy=".3" r=".7">
+      <stop offset="0" stop-color="#fff" stop-opacity=".6"/>
+      <stop offset=".45" stop-color="#fff" stop-opacity=".1"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".35"/>
+    </radialGradient>
+    <linearGradient id="cam-vidrio" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9fd3ff"/>
+      <stop offset=".35" stop-color="#2b5a86"/>
+      <stop offset="1" stop-color="#0d1f33"/>
+    </linearGradient>
+    <linearGradient id="cam-llanta" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#111"/>
+      <stop offset=".5" stop-color="#4a4a4a"/>
+      <stop offset="1" stop-color="#111"/>
+    </linearGradient>
+    <linearGradient id="cam-faro" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffbe0"/>
+      <stop offset="1" stop-color="#f2c94c"/>
+    </linearGradient>
+  </defs>
+
+  <!-- sombra proyectada -->
+  <rect x="7" y="6" width="34" height="96" rx="6" fill="#000" opacity=".4" filter="url(#cam-sombra)"/>
+
+  <!-- llantas -->
+  <g fill="url(#cam-llanta)">
+    <rect x="3" y="15" width="5" height="11" rx="1.6"/>
+    <rect x="36" y="15" width="5" height="11" rx="1.6"/>
+    <rect x="3" y="66" width="5" height="11" rx="1.6"/>
+    <rect x="36" y="66" width="5" height="11" rx="1.6"/>
+    <rect x="3" y="80" width="5" height="11" rx="1.6"/>
+    <rect x="36" y="80" width="5" height="11" rx="1.6"/>
+  </g>
+
+  <!-- quinta rueda / enganche entre cabina y caja -->
+  <rect x="15" y="27" width="14" height="9" rx="1.5" fill="#2a2a2a"/>
+  <rect x="17" y="29" width="10" height="2" rx="1" fill="#555"/>
+
+  <!-- caja de carga -->
+  <g>
+    <rect x="6" y="33" width="32" height="67" rx="2.5" style="fill: var(--camion-color, #d32f2f)"/>
+    <rect x="6" y="33" width="32" height="67" rx="2.5" fill="url(#cam-volumen)"/>
+    <rect x="6" y="33" width="32" height="67" rx="2.5" fill="url(#cam-largo)"/>
+    <!-- costillas del techo -->
+    <g stroke="#000" stroke-opacity=".18" stroke-width=".8">
+      <line x1="7.5" y1="41" x2="36.5" y2="41"/><line x1="7.5" y1="49" x2="36.5" y2="49"/>
+      <line x1="7.5" y1="57" x2="36.5" y2="57"/><line x1="7.5" y1="65" x2="36.5" y2="65"/>
+      <line x1="7.5" y1="73" x2="36.5" y2="73"/><line x1="7.5" y1="81" x2="36.5" y2="81"/>
+      <line x1="7.5" y1="89" x2="36.5" y2="89"/>
+    </g>
+    <g stroke="#fff" stroke-opacity=".22" stroke-width=".6">
+      <line x1="7.5" y1="41.9" x2="36.5" y2="41.9"/><line x1="7.5" y1="49.9" x2="36.5" y2="49.9"/>
+      <line x1="7.5" y1="57.9" x2="36.5" y2="57.9"/><line x1="7.5" y1="65.9" x2="36.5" y2="65.9"/>
+      <line x1="7.5" y1="73.9" x2="36.5" y2="73.9"/><line x1="7.5" y1="81.9" x2="36.5" y2="81.9"/>
+      <line x1="7.5" y1="89.9" x2="36.5" y2="89.9"/>
+    </g>
+    <!-- brillo del borde y marco -->
+    <rect x="9" y="35" width="2.2" height="62" rx="1.1" fill="#fff" opacity=".35"/>
+    <rect x="6.4" y="33.4" width="31.2" height="66.2" rx="2.3" fill="none" stroke="#000" stroke-opacity=".35" stroke-width=".8"/>
+    <!-- calaveras traseras -->
+    <rect x="7.5" y="98" width="4" height="1.6" rx=".6" fill="#ff3b30"/>
+    <rect x="32.5" y="98" width="4" height="1.6" rx=".6" fill="#ff3b30"/>
+  </g>
+
+  <!-- espejos laterales -->
+  <g fill="#1c1c1c">
+    <rect x="1.5" y="10" width="6" height="3" rx="1"/>
+    <rect x="36.5" y="10" width="6" height="3" rx="1"/>
+  </g>
+  <g fill="#9fb4c8">
+    <rect x="2.2" y="10.6" width="2.8" height="1.8" rx=".6"/>
+    <rect x="39" y="10.6" width="2.8" height="1.8" rx=".6"/>
+  </g>
+
+  <!-- cabina -->
+  <g>
+    <path d="M8 30 V10 Q8 2.5 16 2.5 H28 Q36 2.5 36 10 V30 Q36 31 35 31 H9 Q8 31 8 30 Z"
+          style="fill: var(--camion-color, #d32f2f)"/>
+    <path d="M8 30 V10 Q8 2.5 16 2.5 H28 Q36 2.5 36 10 V30 Q36 31 35 31 H9 Q8 31 8 30 Z"
+          fill="url(#cam-brillo-cabina)"/>
+    <path d="M8 30 V10 Q8 2.5 16 2.5 H28 Q36 2.5 36 10 V30 Q36 31 35 31 H9 Q8 31 8 30 Z"
+          fill="none" stroke="#000" stroke-opacity=".4" stroke-width=".8"/>
+    <!-- parabrisas -->
+    <path d="M11 8.5 Q22 5.5 33 8.5 L31.5 14 Q22 12.6 12.5 14 Z" fill="url(#cam-vidrio)"/>
+    <path d="M14 8.2 Q18 7.2 21 7 L17.5 13.3 Q15 13.5 13.6 13.8 Z" fill="#fff" opacity=".35"/>
+    <!-- techo con deflector de aire -->
+    <path d="M12 16 Q22 14.6 32 16 L31 26 Q22 27 13 26 Z" fill="#fff" opacity=".12"/>
+    <path d="M14 17.5 Q22 16.4 30 17.5" stroke="#000" stroke-opacity=".25" stroke-width=".7" fill="none"/>
+    <rect x="18" y="20" width="8" height="3" rx="1.2" fill="#000" opacity=".25"/>
+    <rect x="18.5" y="20.3" width="7" height="1" rx=".5" fill="#fff" opacity=".35"/>
+    <!-- faros -->
+    <ellipse cx="12" cy="3.6" rx="2.6" ry="1.1" fill="url(#cam-faro)"/>
+    <ellipse cx="32" cy="3.6" rx="2.6" ry="1.1" fill="url(#cam-faro)"/>
+    <!-- parrilla -->
+    <rect x="17" y="2.2" width="10" height="1.6" rx=".6" fill="#222" opacity=".8"/>
+  </g>
+</svg>

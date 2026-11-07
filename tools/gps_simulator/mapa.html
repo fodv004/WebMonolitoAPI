@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>GPSapp</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --texto: #222; --suave: #666; --borde: #d0d4d9; --fondo: #f5f6f7; --acento: #2f5d8a;
+          --verde: #2e7d4f; --rojo: #a83a32; }
+  html, body { height: 100%; margin: 0; }
+  [hidden] { display: none !important; }
+  body { display: flex; font: 15px/1.4 "Segoe UI", Arial, sans-serif; color: var(--texto); }
+  #mapa { flex: 1; position: relative; }
+  #mapa.marcando { cursor: crosshair; }
+  #panel { width: 270px; padding: 16px; box-sizing: border-box; background: var(--fondo);
+           border-left: 1px solid var(--borde); overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+  label, .titulo { display: block; font-weight: 600; margin-bottom: 4px; }
+  input[type=text], select { width: 100%; box-sizing: border-box; padding: 7px 8px; font: inherit;
+                             border: 1px solid var(--borde); border-radius: 4px; background: #fff; }
+  input:disabled, select:disabled { background: #eceef0; color: var(--suave); }
+  button { font: inherit; padding: 7px 10px; border: 1px solid var(--borde); border-radius: 4px;
+           background: #fff; color: var(--texto); cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  #nueva { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 10px;
+           background: #fff; border: 1px solid var(--borde); border-radius: 4px; }
+  #nueva p { margin: 0; color: var(--suave); font-size: 14px; }
+  .fila { display: flex; gap: 6px; }
+  .fila button { flex: 1; }
+  .velocidad button.activo { background: var(--acento); border-color: var(--acento); color: #fff; }
+  #arrancar { padding: 14px; font-size: 18px; font-weight: 600; border: none; color: #fff; background: var(--verde); }
+  #arrancar.detener { background: var(--rojo); }
+  #estado div { display: flex; justify-content: space-between; gap: 8px; }
+  #estado span:first-child { color: var(--suave); }
+  #estado b { text-align: right; overflow-wrap: anywhere; }
+  .ok { color: var(--verde); } .mal { color: var(--rojo); }
+  #mensaje { font-size: 14px; color: var(--suave); min-height: 1.4em; }
+  #mensaje.mal { color: var(--rojo); }
+  #seguir { position: absolute; left: 10px; bottom: 24px; z-index: 1000; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+  .camion { background: none; border: none; }
+  .camion .giro { width: 22px; height: 52px; transition: transform .8s ease-out; }
+  .camion img { width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+<div id="mapa"><button id="seguir" hidden>Seguir camión</button></div>
+
+<div id="panel">
+  <div>
+    <label for="vid">ID del camión</label>
+    <input type="text" id="vid" maxlength="40">
+  </div>
+
+  <div>
+    <label for="ruta">Ruta</label>
+    <select id="ruta"></select>
+    <div id="nueva" hidden>
+      <p>Haz clic en el mapa para poner el inicio y luego el destino.</p>
+      <input type="text" id="nombre" placeholder="Nombre de la ruta" maxlength="60">
+      <div class="fila">
+        <button id="limpiar">Limpiar</button>
+        <button id="guardar" disabled>Guardar ruta</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <span class="titulo">Velocidad</span>
+    <div class="fila velocidad">
+      <button data-v="lenta">Lenta</button>
+      <button data-v="normal">Normal</button>
+      <button data-v="rapida">Rápida</button>
+    </div>
+  </div>
+
+  <button id="arrancar" disabled>Iniciar</button>
+
+  <div>
+    <span class="titulo">Estado</span>
+    <div id="estado">
+      <div><span>Conexión</span><b id="conexion">Desconectado</b></div>
+      <div><span>Velocidad</span><b id="vel">—</b></div>
+      <div><span>Servidor</span><b id="servidor">—</b></div>
+    </div>
+    <div id="mensaje"></div>
+  </div>
+</div>
+
+<script>
+const NUEVA = "__nueva__";
+const $ = id => document.getElementById(id);
+
+const mapa = L.map("mapa").setView([25.6866, -100.3161], 12);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(mapa);
+
+const linea = L.polyline([], { color: "#2f5d8a", weight: 5, opacity: .75 }).addTo(mapa);
+const punto = color => ({ radius: 8, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1 });
+const marcaInicio = L.circleMarker([0, 0], punto("#2e7d4f")).bindTooltip("Inicio");
+const marcaDestino = L.circleMarker([0, 0], punto("#a83a32")).bindTooltip("Destino");
+const iconoCamion = L.divIcon({ className: "camion", iconSize: [22, 52], iconAnchor: [11, 26],
+                                html: '<div class="giro"><img src="assets/camion.svg" alt=""></div>' });
+let camion = null, angulo = null, animacion = null;
+
+let api, rutas = {}, andando = false, ultimoN = 0, seguir = true;
+let nueva = { inicio: null, destino: null, geometria: null, por_calles: true };
+
+function mensaje(texto, malo) {
+  $("mensaje").textContent = texto || "";
+  $("mensaje").className = malo ? "mal" : "";
+}
+
+// ---------------------------------------------------------------- rutas
+
+function llenarRutas(seleccion) {
+  const lista = $("ruta");
+  lista.innerHTML = "";
+  Object.keys(rutas).forEach(nombre => lista.add(new Option(nombre, nombre)));
+  lista.add(new Option("Nueva ruta", NUEVA));
+  lista.value = seleccion in rutas ? seleccion : (Object.keys(rutas)[0] || NUEVA);
+  elegirRuta();
+}
+
+function dibujar(inicio, destino, geometria) {
+  inicio ? marcaInicio.setLatLng(inicio).addTo(mapa) : marcaInicio.remove();
+  destino ? marcaDestino.setLatLng(destino).addTo(mapa) : marcaDestino.remove();
+  linea.setLatLngs(geometria || []);
+}
+
+function quitarCamion() {
+  if (camion) { camion.remove(); camion = null; angulo = null; }
+}
+
+function elegirRuta() {
+  const valor = $("ruta").value;
+  const esNueva = valor === NUEVA;
+  $("nueva").hidden = !esNueva;
+  $("mapa").classList.toggle("marcando", esNueva);
+  quitarCamion();
+  mensaje("");
+  if (esNueva) {
+    limpiarNueva();
+  } else {
+    const r = rutas[valor];
+    dibujar(r.inicio, r.destino, r.geometria);
+    mapa.fitBounds(linea.getBounds(), { padding: [40, 40] });
+    if (!r.por_calles) mensaje("Esta ruta va en línea recta (no se calculó por calles).");
+  }
+  actualizarBotones();
+}
+
+function limpiarNueva() {
+  nueva = { inicio: null, destino: null, geometria: null, por_calles: true };
+  dibujar(null, null, null);
+  mensaje("");
+  actualizarBotones();
+}
+
+async function clicMapa(e) {
+  if ($("ruta").value !== NUEVA || andando) return;
+  const p = [+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)];
+  if (!nueva.inicio) {
+    nueva.inicio = p;
+    dibujar(nueva.inicio, null, null);
+    mensaje("Ahora haz clic en el destino.");
+  } else if (!nueva.destino) {
+    nueva.destino = p;
+    dibujar(nueva.inicio, nueva.destino, [nueva.inicio, nueva.destino]);
+    mensaje("Calculando el camino por calles...");
+    const r = await api.calcular_ruta(nueva.inicio, nueva.destino);
+    if (!nueva.destino) return;  // pulsó Limpiar mientras se calculaba
+    nueva.geometria = r.geometria;
+    nueva.por_calles = r.por_calles;
+    linea.setLatLngs(r.geometria);
+    mensaje(r.por_calles ? "Camino listo. Ponle nombre y guárdalo."
+                         : "No se pudo calcular por calles (OSRM no responde): se unieron los puntos en línea recta.",
+            !r.por_calles);
+  } else {
+    mensaje("Ya hay inicio y destino. Pulsa Limpiar para empezar de nuevo.");
+  }
+  actualizarBotones();
+}
+
+async function guardar() {
+  $("guardar").disabled = true;
+  const r = await api.guardar_ruta($("nombre").value, nueva.inicio, nueva.destino, nueva.geometria, nueva.por_calles);
+  if (!r.ok) { mensaje(r.mensaje, true); actualizarBotones(); return; }
+  rutas = r.rutas;
+  const nombre = $("nombre").value.trim();
+  $("nombre").value = "";
+  llenarRutas(nombre);
+  mensaje(r.mensaje);
+}
+
+// ---------------------------------------------------------------- velocidad e iniciar
+
+function marcarVelocidad(v) {
+  document.querySelectorAll(".velocidad button").forEach(b => b.classList.toggle("activo", b.dataset.v === v));
+}
+
+function actualizarBotones() {
+  const esNueva = $("ruta").value === NUEVA;
+  $("vid").disabled = andando;
+  $("ruta").disabled = andando;
+  $("guardar").disabled = !(nueva.geometria && $("nombre").value.trim());
+  const boton = $("arrancar");
+  boton.textContent = andando ? "Detener" : "Iniciar";
+  boton.classList.toggle("detener", andando);
+  boton.disabled = !andando && esNueva;
+}
+
+async function arrancar() {
+  const boton = $("arrancar");
+  boton.disabled = true;
+  if (andando) {
+    boton.textContent = "Deteniendo...";
+    await api.detener();
+    andando = false;
+    mensaje("Camión detenido.");
+  } else {
+    const r = await api.iniciar($("vid").value, $("ruta").value);
+    if (!r.ok) { mensaje(r.mensaje, true); actualizarBotones(); return; }
+    andando = true;
+    seguir = true;
+    $("seguir").hidden = true;
+    ultimoN = 0;
+    quitarCamion();
+    mensaje("Camión en marcha.");
+  }
+  actualizarBotones();
+}
+
+// ---------------------------------------------------------------- camión en el mapa
+
+function mover(destino, duracion) {
+  if (!camion) { camion = L.marker(destino, { icon: iconoCamion, zIndexOffset: 1000 }).addTo(mapa); return; }
+  const origen = camion.getLatLng(), inicio = performance.now();
+  cancelAnimationFrame(animacion);
+  (function cuadro(ahora) {
+    const f = Math.min(1, (ahora - inicio) / duracion);
+    camion.setLatLng([origen.lat + (destino[0] - origen.lat) * f, origen.lng + (destino[1] - origen.lng) * f]);
+    if (f < 1) animacion = requestAnimationFrame(cuadro);
+  })(inicio);
+}
+
+function girar(rumbo) {
+  // Gira por el camino más corto (de 350° a 10° son +20°, no -340°).
+  angulo = angulo === null ? rumbo : angulo + ((rumbo - angulo % 360) + 540) % 360 - 180;
+  camion.getElement().querySelector(".giro").style.transform = "rotate(" + angulo + "deg)";
+}
+
+async function consultarEstado() {
+  const e = await api.estado();
+  $("conexion").textContent = e.conectado ? "Conectado" : "Desconectado";
+  $("conexion").className = e.conectado ? "ok" : "";
+  $("vel").textContent = e.andando && e.speed !== null ? e.speed.toFixed(1) + " km/h" : "—";
+  $("servidor").textContent = e.servidor || "—";
+  $("servidor").className = e.servidor === "ack" ? "ok" : (e.servidor ? "mal" : "");
+  if (e.posicion && e.n !== ultimoN) {
+    ultimoN = e.n;
+    const p = [e.posicion.latitude, e.posicion.longitude];
+    mover(p, 950);
+    girar(e.posicion.heading);
+    if (seguir) mapa.panTo(p, { animate: true, duration: .9 });
+  }
+}
+
+// Si el usuario mueve el mapa mientras el camión anda, la vista deja de seguirlo.
+mapa.on("dragstart", () => { if (andando) { seguir = false; $("seguir").hidden = false; } });
+$("seguir").onclick = e => {
+  e.stopPropagation();
+  seguir = true;
+  $("seguir").hidden = true;
+  if (camion) mapa.panTo(camion.getLatLng());
+};
+L.DomEvent.disableClickPropagation($("seguir"));
+
+// ---------------------------------------------------------------- arranque
+
+async function arrancarPagina() {
+  if (api) return;
+  api = window.pywebview.api;
+  const datos = await api.inicio();
+  $("vid").value = datos.vehicle_id;
+  rutas = datos.rutas;
+  marcarVelocidad(datos.velocidad);
+  llenarRutas();
+
+  mapa.on("click", clicMapa);
+  $("ruta").onchange = elegirRuta;
+  $("limpiar").onclick = limpiarNueva;
+  $("guardar").onclick = guardar;
+  $("nombre").oninput = actualizarBotones;
+  $("arrancar").onclick = arrancar;
+  document.querySelectorAll(".velocidad button").forEach(b => b.onclick = () => {
+    marcarVelocidad(b.dataset.v);
+    api.cambiar_velocidad(b.dataset.v);
+  });
+
+  let consultando = false;
+  setInterval(async () => {
+    if (consultando) return;
+    consultando = true;
+    try { await consultarEstado(); } finally { consultando = false; }
+  }, 500);
+}
+
+window.addEventListener("pywebviewready", arrancarPagina);
+if (window.pywebview && window.pywebview.api && window.pywebview.api.inicio) arrancarPagina();
+</script>
+</body>
+</html>

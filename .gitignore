@@ -4,3 +4,15 @@ node_modules/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Entornos virtuales y caches (agregado al integrar el GPS Tracker)
+venv/
+env/
+*.pyo
+.mypy_cache/
+.idea/
+.vscode/
+*.class
+target/
+build/
+out/

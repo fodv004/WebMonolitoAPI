@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Mapa de la flota</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --texto: #222; --suave: #666; --borde: #d0d4d9; --fondo: #f5f6f7;
+          --verde: #2e7d4f; --ambar: #b26a00; --rojo: #a83a32; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; font: 15px/1.4 "Segoe UI", Arial, sans-serif; color: var(--texto); }
+  #mapa { flex: 1; }
+  #panel { width: 290px; box-sizing: border-box; padding: 16px; background: var(--fondo);
+           border-left: 1px solid var(--borde); display: flex; flex-direction: column; gap: 16px; }
+  .titulo { display: block; font-weight: 600; margin-bottom: 4px; }
+  #conexion { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  #conexion .punto { width: 10px; height: 10px; border-radius: 50%; background: var(--ambar); }
+  #conexion.conectado .punto { background: var(--verde); }
+  #conexion.conectado { color: var(--verde); }
+  #conexion.reconectando { color: var(--ambar); }
+  #conexion small { font-weight: normal; color: var(--suave); }
+  .fila { display: flex; justify-content: space-between; gap: 8px; }
+  .fila span:first-child { color: var(--suave); }
+  label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; }
+  input[type=number] { width: 80px; padding: 6px; font: inherit; border: 1px solid var(--borde); border-radius: 4px; }
+  input.mal { border-color: var(--rojo); }
+  #aviso { color: var(--rojo); font-size: 14px; min-height: 1.4em; margin-top: 4px; }
+  #lista-caja { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #lista { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1;
+           border: 1px solid var(--borde); border-radius: 4px; background: #fff; }
+  #lista li { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer;
+              border-bottom: 1px solid #eceef0; }
+  #lista li:hover { background: #eef2f6; }
+  #lista .muestra { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  #lista .id { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #lista .vel { color: var(--suave); font-size: 14px; }
+  #lista li.inactivo .id, #lista li.inactivo .vel { color: #999; }
+  #lista .vacia { color: var(--suave); cursor: default; }
+  .camion { background: none; border: none; }
+  .camion .giro { width: 22px; height: 52px; transition: transform .8s ease-out; }
+  .camion svg { width: 100%; height: 100%; display: block; }
+  .leaflet-popup-content { font: 14px/1.5 "Segoe UI", Arial, sans-serif; }
+</style>
+</head>
+<body>
+<div id="mapa"></div>
+
+<div id="panel">
+  <div id="conexion"><span class="punto"></span><span id="conexion-texto">Conectando...</span></div>
+
+  <div>
+    <div class="fila"><span>Conectados en total</span><b id="total">—</b></div>
+    <div class="fila"><span>Mostrando en el mapa</span><b id="mostrando">0</b></div>
+  </div>
+
+  <div>
+    <span class="titulo">Mostrar</span>
+    <label>Camiones a mostrar <input type="number" id="max" min="1" step="1" value="20"></label>
+    <label>Actualizar cada (s) <input type="number" id="intervalo" min="0.1" step="0.5" value="1"></label>
+    <div id="aviso"></div>
+  </div>
+
+  <div id="lista-caja">
+    <span class="titulo">Camiones</span>
+    <ul id="lista"></ul>
+  </div>
+</div>
+
+<script>
+const URL_WS = "ws://localhost:5900/ws?role=map";
+const MONTERREY = [25.6866, -100.3161];
+const GRIS = "#9e9e9e";
+const ESTELA_MAX = 40;   // puntos de la estela por camión
+const $ = id => document.getElementById(id);
+
+const mapa = L.map("mapa").setView(MONTERREY, 12);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(mapa);
+
+let SVG = "";
+const vehiculos = new Map();   // vehicle_id -> { marcador, estela, puntos, datos, color, angulo, animacion }
+let config = { max_vehicles: 20, interval: 1 };
+
+// ---------------------------------------------------------------- camiones
+
+function colorDe(id) {
+  // Color estable por ID (el mismo camión siempre tiene el mismo color).
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `hsl(${(h * 137.5) % 360}, 65%, 42%)`;
+}
+
+function hora(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleTimeString("es-MX", { hour12: false });
+}
+
+function textoPopup(d) {
+  const div = document.createElement("div");
+  const filas = [
+    ["Velocidad", d.speed.toFixed(1) + " km/h"],
+    ["Coordenadas", d.latitude.toFixed(5) + ", " + d.longitude.toFixed(5)],
+    ["Última actualización", hora(d.received_at)],
+    ["Estado", d.active ? "activo" : "inactivo"],
+  ];
+  const b = document.createElement("b");
+  b.textContent = "Camión " + d.vehicle_id;
+  div.append(b);
+  filas.forEach(([k, v]) => { div.append(document.createElement("br"), k + ": " + v); });
+  return div;
+}
+
+function pintar(v, activo) {
+  const color = activo ? v.color : GRIS;
+  const giro = v.marcador.getElement() && v.marcador.getElement().querySelector(".giro");
+  if (giro) giro.style.setProperty("--camion-color", color);
+  v.estela.setStyle({ color });
+}
+
+function girar(v, rumbo) {
+  // Gira por el camino más corto (de 350° a 10° son +20°, no -340°).
+  v.angulo = v.angulo === null ? rumbo : v.angulo + ((rumbo - v.angulo % 360) + 540) % 360 - 180;
+  const giro = v.marcador.getElement() && v.marcador.getElement().querySelector(".giro");
+  if (giro) giro.style.transform = "rotate(" + v.angulo + "deg)";
+}
+
+function mover(v, destino) {
+  const origen = v.marcador.getLatLng(), inicio = performance.now();
+  const duracion = Math.min(config.interval, 5) * 900;
+  cancelAnimationFrame(v.animacion);
+  (function cuadro(ahora) {
+    const f = Math.min(1, (ahora - inicio) / duracion);
+    v.marcador.setLatLng([origen.lat + (destino[0] - origen.lat) * f, origen.lng + (destino[1] - origen.lng) * f]);
+    if (f < 1) v.animacion = requestAnimationFrame(cuadro);
+  })(inicio);
+}
+
+function actualizarVehiculo(d) {
+  const pos = [d.latitude, d.longitude];
+  let v = vehiculos.get(d.vehicle_id);
+  if (!v) {
+    const color = colorDe(d.vehicle_id);
+    const icono = L.divIcon({ className: "camion", iconSize: [22, 52], iconAnchor: [11, 26],
+                              html: '<div class="giro">' + SVG + "</div>" });
+    v = { color, angulo: null, animacion: null, puntos: [pos],
+          estela: L.polyline([pos], { color, weight: 3, opacity: .5 }).addTo(mapa),
+          marcador: L.marker(pos, { icon: icono, zIndexOffset: 1000 }).addTo(mapa).bindPopup("") };
+    vehiculos.set(d.vehicle_id, v);
+  } else if (v.datos.latitude !== d.latitude || v.datos.longitude !== d.longitude) {
+    v.puntos.push(pos);
+    if (v.puntos.length > ESTELA_MAX) v.puntos.shift();
+    v.estela.setLatLngs(v.puntos);
+    mover(v, pos);
+  }
+  v.datos = d;
+  girar(v, d.heading);
+  pintar(v, d.active);
+  v.marcador.setPopupContent(textoPopup(d));
+}
+
+function aplicar(lista) {
+  // Cada snapshot/update trae el estado actual de los camiones a mostrar:
+  // los que ya no vienen (por ejemplo, al bajar la cantidad) se quitan del mapa.
+  const vistos = new Set();
+  lista.forEach(d => { vistos.add(d.vehicle_id); actualizarVehiculo(d); });
+  for (const [id, v] of vehiculos) {
+    if (!vistos.has(id)) { cancelAnimationFrame(v.animacion); v.marcador.remove(); v.estela.remove(); vehiculos.delete(id); }
+  }
+  dibujarLista();
+}
+
+function dibujarLista() {
+  const lista = $("lista");
+  lista.innerHTML = "";
+  const ids = [...vehiculos.keys()].sort();
+  $("mostrando").textContent = ids.length;
+  if (!ids.length) {
+    const li = document.createElement("li");
+    li.className = "vacia";
+    li.textContent = "Sin camiones por ahora.";
+    lista.append(li);
+    return;
+  }
+  ids.forEach(id => {
+    const v = vehiculos.get(id);
+    const activo = enLinea && v.datos.active;
+    const li = document.createElement("li");
+    li.className = activo ? "" : "inactivo";
+    const muestra = document.createElement("span");
+    muestra.className = "muestra";
+    muestra.style.background = activo ? v.color : GRIS;
+    const nombre = document.createElement("span");
+    nombre.className = "id";
+    nombre.textContent = id;
+    const vel = document.createElement("span");
+    vel.className = "vel";
+    vel.textContent = activo ? v.datos.speed.toFixed(0) + " km/h" : (enLinea ? "inactivo" : "sin conexión");
+    li.append(muestra, nombre, vel);
+    li.onclick = () => {
+      mapa.setView(v.marcador.getLatLng(), Math.max(mapa.getZoom(), 15));
+      v.marcador.openPopup();
+    };
+    lista.append(li);
+  });
+}
+
+// ---------------------------------------------------------------- conexión
+
+let ws = null, intentos = 0, enLinea = false;
+
+function estadoConexion(estado, texto) {
+  $("conexion").className = estado;
+  $("conexion-texto").innerHTML = "";
+  $("conexion-texto").append(texto);
+}
+
+function conectar() {
+  ws = new WebSocket(URL_WS);
+  ws.onopen = () => {
+    intentos = 0;
+    enLinea = true;
+    estadoConexion("conectado", "Conectado");
+    enviarConfig();   // al (re)conectar se vuelve a mandar la config actual
+  };
+  ws.onmessage = e => {
+    let m;
+    try { m = JSON.parse(e.data); } catch { return; }
+    if (m.type === "snapshot" || m.type === "update") aplicar(m.vehicles || []);
+    else if (m.type === "error") $("aviso").textContent = "Servidor: " + m.detail;
+  };
+  ws.onclose = () => {
+    intentos++;
+    const espera = Math.min(10, 2 ** (intentos - 1));
+    const texto = document.createElement("span");
+    texto.append("Reconectando... ");
+    const detalle = document.createElement("small");
+    detalle.textContent = `(intento ${intentos}, en ${espera} s)`;
+    texto.append(detalle);
+    estadoConexion("reconectando", texto);
+    enLinea = false;
+    vehiculos.forEach(v => pintar(v, false));  // sin servidor no sabemos si siguen activos
+    dibujarLista();
+    $("total").textContent = "—";
+    setTimeout(conectar, espera * 1000);
+  };
+}
+
+function enviarConfig() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "config", max_vehicles: config.max_vehicles, interval: config.interval }));
+  }
+}
+
+// ---------------------------------------------------------------- panel
+
+let espera = null;
+function cambiarConfig() {
+  const max = Number($("max").value), intervalo = Number($("intervalo").value);
+  const maxOk = Number.isInteger(max) && max >= 1;
+  const intOk = Number.isFinite(intervalo) && intervalo >= 0.1 && intervalo <= 3600;
+  $("max").classList.toggle("mal", !maxOk);
+  $("intervalo").classList.toggle("mal", !intOk);
+  if (!maxOk || !intOk) {
+    $("aviso").textContent = !maxOk ? "La cantidad debe ser un entero de 1 o más."
+                                    : "Los segundos deben estar entre 0.1 y 3600.";
+    return;
+  }
+  $("aviso").textContent = "";
+  clearTimeout(espera);
+  espera = setTimeout(() => {   // espera a que termine de escribir
+    if (max === config.max_vehicles && intervalo === config.interval) return;
+    config = { max_vehicles: max, interval: intervalo };
+    enviarConfig();
+  }, 400);
+}
+$("max").addEventListener("input", cambiarConfig);
+$("intervalo").addEventListener("input", cambiarConfig);
+
+async function consultarTotal() {
+  if (!(window.pywebview && window.pywebview.api && window.pywebview.api.health)) return;
+  const h = await window.pywebview.api.health();
+  $("total").textContent = h ? h.active_vehicles : "—";
+}
+
+// ---------------------------------------------------------------- arranque
+
+fetch("assets/camion.svg").then(r => r.text()).catch(() => "").then(svg => {
+  SVG = svg;
+  dibujarLista();
+  conectar();
+  let consultando = false;
+  setInterval(async () => {
+    if (consultando) return;
+    consultando = true;
+    try { await consultarTotal(); } finally { consultando = false; }
+  }, 2000);
+});
+</script>
+</body>
+</html>

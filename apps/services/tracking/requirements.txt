@@ -1,0 +1,5 @@
+flask>=3.0
+flask-sock>=0.7
+
+# Para correrlo en la VM como servicio (1 worker + hilos, ver deploy/tracking.service).
+gunicorn>=23.0

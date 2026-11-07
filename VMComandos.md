@@ -1328,3 +1328,76 @@ En tu máquina: `cd apps\Python_app`, `python main.py`, y en **Configuración** 
 | Un pago aparece `REEMBOLSADO` con la nota "Reembolso automático" | El pedido expiró o se canceló antes de poder confirmarle el pago |
 | Reembolsar responde `409 PEDIDO_NO_CANCELABLE` | El pedido ya está `ENVIADO` o `ENTREGADO` |
 | Pagar responde `403` | El pedido no es del usuario del token (ni el admin paga pedidos ajenos) |
+
+## 23. Microservicio tracking (GPS, puerto 5900)
+
+tracking no usa `.env`, PostgreSQL ni Redis, y **no** forma parte de `scripts/levantar_servicios.sh`.
+Se levanta a mano con gunicorn en **1 worker con hilos** (`gthread`): la flota vive en memoria del
+proceso y cada conexión WebSocket ocupa un hilo mientras está abierta. Con más de 1 worker cada
+proceso tendría su propia flota y el mapa no vería a todos los camiones.
+
+### 23.1 Código y dependencias
+
+```bash
+cd ~/WebMonolitoAPI && export REPO="$(pwd)"       # ajusta la ruta
+git pull && git log --oneline -3
+cd "$REPO/apps/services/tracking"
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+### 23.2 Prueba rápida en primer plano (Ctrl+C para salir)
+
+```bash
+cd "$REPO/apps/services/tracking"
+.venv/bin/gunicorn --workers 1 --worker-class gthread --threads 50 --timeout 60 --bind 0.0.0.0:5900 app:app
+# en otra terminal de la VM:
+curl -s http://localhost:5900/health
+# -> {"active_vehicles":0,"map_clients":0,"status":"ok","vehicles":0}
+```
+
+### 23.3 Dejarlo corriendo con systemd
+
+```bash
+cd "$REPO"
+sed -e "s|__USER__|$(id -un)|g" -e "s|__REPO_DIR__|$REPO|g" apps/services/tracking/deploy/tracking.service \
+    | sudo tee /etc/systemd/system/tracking.service > /dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now tracking
+sudo systemctl status tracking --no-pager
+journalctl -u tracking -n 30 --no-pager
+curl -s http://localhost:5900/health
+```
+
+Tras un `git pull` con cambios en tracking: `sudo systemctl restart tracking`.
+
+### 23.4 Firewall (para conectarte desde tu máquina)
+
+```bash
+sudo firewall-cmd --state && sudo firewall-cmd --permanent --add-port=5900/tcp && sudo firewall-cmd --reload
+```
+
+Desde Cloud Shell o tu máquina con `gcloud`:
+
+```bash
+gcloud compute firewall-rules create library-tracking \
+    --allow tcp:5900 --source-ranges <TU_IP_PUBLICA>/32 --description "Microservicio tracking GPS"
+# Si la regla ya existe: gcloud compute firewall-rules update library-tracking --allow tcp:5900
+```
+
+### 23.5 Comprobación desde tu máquina (PowerShell)
+
+```powershell
+curl.exe -s http://34.51.0.253:5900/health
+```
+
+El simulador (`tools/gps_simulator`) y el mapa (`apps/GPS_desktop_app`) apuntan a `localhost:5900`;
+para usarlos contra la VM hay que cambiar esa URL en su código (no se cambió en esta integración).
+
+| Síntoma | Qué revisar |
+|---|---|
+| `curl` a `/health` no responde en la VM | `systemctl status tracking`, `journalctl -u tracking` |
+| Responde en la VM pero no desde tu máquina | Firewall: `firewalld` (23.4) y regla `library-tracking` de GCP |
+| El mapa no ve todos los camiones | Que el `ExecStart` tenga `--workers 1` |
+| Las conexiones WebSocket se cortan o no conectan más | Subir `--threads` (cada camión y cada mapa ocupa un hilo) |

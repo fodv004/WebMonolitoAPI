@@ -1,0 +1,6 @@
+websocket-client>=1.8
+pywebview>=5.0
+
+# Solo para el servidor de prueba (servidor_prueba.py), no lo necesita la GPSapp.
+flask>=3.0
+flask-sock>=0.7
