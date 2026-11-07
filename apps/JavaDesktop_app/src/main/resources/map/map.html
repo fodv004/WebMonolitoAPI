@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Rastreo</title>
+  <link rel="stylesheet" href="leaflet/leaflet.css">
+  <style>
+    html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; }
+    html, body { overflow: hidden; }
+    body { font-family: "Segoe UI", sans-serif; background: #e8eef5; }
+    #map { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+    .truck-icon { background: transparent; border: none; }
+    .truck-icon .bubble {
+      width: 42px; height: 42px; border-radius: 50%; background: #ffffff;
+      border: 3px solid #2563eb; box-shadow: 0 2px 8px rgba(0,0,0,.35);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .truck-icon.delivered .bubble { border-color: #16a34a; }
+    .flag-icon { background: transparent; border: none; font-size: 26px; line-height: 26px; }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<!-- El WebView de JavaFX no pinta bien las capas con translate3d: Leaflet usa posiciones 2D. -->
+<script>window.L_DISABLE_3D = true;</script>
+<script src="leaflet/leaflet.js"></script>
+<script src="map.js"></script>
+</body>
+</html>
