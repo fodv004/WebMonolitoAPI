@@ -464,3 +464,48 @@ def test_concurrencia_sobre_el_mismo_isbn_nunca_sobrevende(client, repo, pedir):
 
     assert sorted(resultados) == [201] * 3 + [409] * 7
     assert repo.stock(ALEPH) == (0, 3) and len(repo.pedidos) == 3
+
+
+# ------------------------------------------------------------------ tracking (endpoint interno)
+# El pedido se siembra directo en FakeRepo (sin pasar por books) para probar solo la maquina de estados.
+def _pedido_en(repo, estado, user_id=ANA_ID):
+    pedido = repo.pedido_insert(user_id, 300.0, 15)
+    repo.pedidos[pedido["id"]]["estado"] = estado
+    repo.historial_insert(pedido["id"], None, estado, f"user:{user_id}")
+    return pedido["id"]
+
+
+def _interno(client, pedido_id, estado):
+    return client.patch(f"/pedidos/internal/{pedido_id}/estado", headers=INTERNA, json={"estado": estado})
+
+
+def test_tracking_marca_enviado_y_entregado_por_el_endpoint_interno(client, repo):
+    pedido = _pedido_en(repo, "PAGADO")
+    enviado = _interno(client, pedido, "ENVIADO")
+    assert enviado.status_code == 200 and enviado.get_json()["estado"] == "ENVIADO"
+    entregado = _interno(client, pedido, "ENTREGADO")
+    assert entregado.status_code == 200 and entregado.get_json()["estado"] == "ENTREGADO"
+    historial = entregado.get_json()["historial"]
+    assert [(h["estado_anterior"], h["estado_nuevo"], h["actor"]) for h in historial[-2:]] == [
+        ("PAGADO", "ENVIADO", "service:tracking"), ("ENVIADO", "ENTREGADO", "service:tracking")]
+
+
+def test_tracking_respeta_las_transiciones(client, repo):
+    pendiente = _pedido_en(repo, "PENDIENTE_PAGO")
+    resp = _interno(client, pendiente, "ENVIADO")                      # ENVIADO solo desde PAGADO
+    assert resp.status_code == 409 and _error(resp) == "TRANSICION_INVALIDA"
+    pagado = _pedido_en(repo, "PAGADO")
+    resp = _interno(client, pagado, "ENTREGADO")                       # ENTREGADO solo desde ENVIADO
+    assert resp.status_code == 409 and _error(resp) == "TRANSICION_INVALIDA"
+    assert repo.pedidos[pendiente]["estado"] == "PENDIENTE_PAGO" and repo.pedidos[pagado]["estado"] == "PAGADO"
+    assert _interno(client, pagado, "ENVIADO").status_code == 200
+    assert _interno(client, pagado, "ENVIADO").status_code == 409      # repetir ENVIADO tambien es 409
+
+
+def test_endpoint_interno_sigue_rechazando_estados_desconocidos_y_pagos_no_cambia(client, repo):
+    pedido = _pedido_en(repo, "PENDIENTE_PAGO")
+    for estado in ("EXPIRADO", "PENDIENTE_PAGO", "EN_RUTA"):
+        assert _interno(client, pedido, estado).status_code == 400
+    pago = _interno(client, pedido, "PAGADO")
+    assert pago.status_code == 200 and pago.get_json()["historial"][-1]["actor"] == "servicio:pagos"
+    assert client.patch(f"/pedidos/internal/{pedido}/estado", json={"estado": "ENVIADO"}).status_code == 401

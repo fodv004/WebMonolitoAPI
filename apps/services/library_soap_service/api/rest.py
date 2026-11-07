@@ -13,6 +13,10 @@ GET /books y GET /books/<isbn> se cachean 60 s en Redis (claves
 books:list:<filtros> y books:<isbn>) y cualquier escritura invalida la
 cache. Redis es opcional para estas lecturas: si falla se consulta
 PostgreSQL. GET /health y GET /metrics los registra app.py (modulo comun).
+
+Campo opcional `descripcion` (libros.descripcion, TEXT NULL; migracion
+sql/001_libros_descripcion.sql): va al FINAL de cada fila leida y se lee
+con _descripcion(), que tolera filas sin el (cache de Redis anterior).
 """
 import xml.etree.ElementTree as ET
 from decimal import Decimal
@@ -29,6 +33,7 @@ rest_bp = Blueprint("rest_api", __name__)
 
 FORMATOS_VALIDOS = {"xml", "json"}
 MODELOS_CLOUD = ("IaaS", "PaaS", "SaaS", "FaaS")
+DESCRIPCION_MAXIMO = 5000
 
 
 class FormatoInvalido(Exception):
@@ -81,6 +86,11 @@ def _filas_json(filas):
     return [[str(v) if isinstance(v, Decimal) else v for v in fila] for fila in filas]
 
 
+def _descripcion(fila, posicion):
+    """libros.descripcion de una fila, o None si la fila es anterior a la columna (cache vieja)."""
+    return fila[posicion] if len(fila) > posicion else None
+
+
 def _invalidar_cache_libros(isbn):
     redis_client.cache_delete(redis_keys.book(isbn))
     redis_client.cache_invalidate(redis_keys.BOOKS_LIST_PATTERN)
@@ -127,7 +137,7 @@ def _fetch_libro(isbn):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre
+                SELECT l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre, l.descripcion
                 FROM libros l
                 JOIN formatos f ON f.id_formato = l.id_formato
                 WHERE l.isbn = %s
@@ -172,14 +182,15 @@ def _fetch_todos_libros():
                            WHERE i.isbn = l.isbn
                            ORDER BY i.es_principal DESC, i.orden ASC NULLS LAST
                            LIMIT 1
-                       ) AS imagen_url
+                       ) AS imagen_url,
+                       l.descripcion
                 FROM libros l
                 JOIN formatos f ON f.id_formato = l.id_formato
                 LEFT JOIN libro_autor la ON la.isbn = l.isbn
                 LEFT JOIN autores a ON a.id_autor = la.id_autor
                 LEFT JOIN libro_genero lg ON lg.isbn = l.isbn
                 LEFT JOIN generos g ON g.id_genero = lg.id_genero
-                GROUP BY l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre
+                GROUP BY l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre, l.descripcion
                 ORDER BY l.isbn
                 """
             )
@@ -246,7 +257,8 @@ def _fetch_libro_card(isbn):
                            WHERE i.isbn = l.isbn
                            ORDER BY i.es_principal DESC, i.orden ASC NULLS LAST
                            LIMIT 1
-                       ) AS imagen_url
+                       ) AS imagen_url,
+                       l.descripcion
                 FROM libros l
                 JOIN formatos f ON f.id_formato = l.id_formato
                 LEFT JOIN libro_autor la ON la.isbn = l.isbn
@@ -254,7 +266,7 @@ def _fetch_libro_card(isbn):
                 LEFT JOIN libro_genero lg ON lg.isbn = l.isbn
                 LEFT JOIN generos g ON g.id_genero = lg.id_genero
                 WHERE l.isbn = %s
-                GROUP BY l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre
+                GROUP BY l.isbn, l.titulo, l.anio_publicacion, l.precio, l.stock, f.nombre, l.descripcion
                 """,
                 (isbn,),
             )
@@ -264,7 +276,7 @@ def _fetch_libro_card(isbn):
 
 
 def _card_dict(row):
-    isbn, titulo, anio, precio, stock, formato_nombre, autor, genero, imagen_url = row
+    isbn, titulo, anio, precio, stock, formato_nombre, autor, genero, imagen_url = row[:9]
     return {
         "isbn": isbn,
         "titulo": titulo,
@@ -277,6 +289,7 @@ def _card_dict(row):
         "portada": imagen_url,
         "image_url": imagen_url,
         "href": f"{request.host_url.rstrip('/')}/books/{isbn}",
+        "descripcion": _descripcion(row, 9),
     }
 
 
@@ -419,7 +432,8 @@ def listar_libros():
         return jsonify([_card_dict(fila) for fila in libros]), 200
 
     root = ET.Element("books")
-    for isbn, titulo, anio, precio, stock, formato_nombre, autor, genero, imagen_url in libros:
+    for fila in libros:
+        isbn, titulo, anio, precio, stock, formato_nombre, autor, genero, imagen_url = fila[:9]
         book_el = ET.SubElement(root, "book", {"isbn": isbn})
         ET.SubElement(book_el, "title").text = titulo
         ET.SubElement(book_el, "year").text = str(anio)
@@ -429,6 +443,7 @@ def listar_libros():
         ET.SubElement(book_el, "author").text = autor
         ET.SubElement(book_el, "genre").text = genero
         ET.SubElement(book_el, "image_url").text = imagen_url
+        ET.SubElement(book_el, "description").text = _descripcion(fila, 9)
 
         concepts_el = ET.SubElement(book_el, "cloudConcepts")
         for id_concepto, nombre_concepto, modelo_cloud, votos in datos["conceptos"].get(isbn, []):
@@ -457,7 +472,8 @@ def obtener_libro(isbn):
             "mensaje": f"No existe un libro con ISBN {isbn}.",
         }), 404
 
-    isbn_db, titulo, anio, precio, stock, formato_nombre = datos["libro"]
+    isbn_db, titulo, anio, precio, stock, formato_nombre = datos["libro"][:6]
+    descripcion = _descripcion(datos["libro"], 6)
 
     if formato == "json":
         card = {
@@ -469,6 +485,7 @@ def obtener_libro(isbn):
             "formato": formato_nombre,
             "portada": datos["portada"],
             "href": request.base_url,
+            "descripcion": descripcion,
         }
         return jsonify(card), 200
 
@@ -478,6 +495,7 @@ def obtener_libro(isbn):
     ET.SubElement(book_el, "price").text = str(precio)
     ET.SubElement(book_el, "stock").text = str(stock)
     ET.SubElement(book_el, "format").text = formato_nombre
+    ET.SubElement(book_el, "description").text = descripcion
 
     concepts_el = ET.SubElement(book_el, "cloudConcepts")
     for id_concepto, nombre_concepto, modelo_cloud, votos in datos["conceptos"]:
@@ -593,7 +611,7 @@ def listar_formatos():
 # ============================================================
 # 7. Crear libro. Body: isbn, titulo, anio, precio, stock, formato
 #    (nombre; se crea si no existe) y, opcionales, autor, genero,
-#    portada (url de la imagen principal).
+#    portada (url de la imagen principal) y descripcion.
 # ============================================================
 @rest_bp.route("/books", methods=["POST"])
 @jwt_requerido
@@ -610,6 +628,7 @@ def crear_libro():
     autor = _texto(data, "autor", maximo=150)
     genero = _texto(data, "genero", maximo=50)
     portada = _texto(data, "portada", maximo=500)
+    descripcion = _texto(data, "descripcion", maximo=DESCRIPCION_MAXIMO)
 
     conn = get_connection()
     try:
@@ -619,10 +638,10 @@ def crear_libro():
                     id_formato = _get_or_create_formato(nombre_formato, cur)
                     cur.execute(
                         """
-                        INSERT INTO libros (isbn, titulo, anio_publicacion, precio, stock, id_formato)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        INSERT INTO libros (isbn, titulo, anio_publicacion, precio, stock, id_formato, descripcion)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                         """,
-                        (isbn, titulo, anio, precio, stock, id_formato),
+                        (isbn, titulo, anio, precio, stock, id_formato, descripcion),
                     )
                     if autor:
                         _set_autor(isbn, autor, cur)
@@ -644,7 +663,7 @@ def crear_libro():
 
 # ============================================================
 # 8. Editar libro. Body: cualquier subconjunto de titulo, anio,
-#    precio, stock, formato, autor, genero, portada.
+#    precio, stock, formato, autor, genero, portada, descripcion.
 # ============================================================
 @rest_bp.route("/books/<isbn>", methods=["PUT"])
 @jwt_requerido
@@ -679,6 +698,7 @@ def _actualizar_campos_enviados(isbn):
     autor = _texto(data, "autor", maximo=150)
     genero = _texto(data, "genero", maximo=50)
     portada = _texto(data, "portada", maximo=500)
+    descripcion = _texto(data, "descripcion", maximo=DESCRIPCION_MAXIMO)
 
     conn = get_connection()
     try:
@@ -700,6 +720,9 @@ def _actualizar_campos_enviados(isbn):
                 if nombre_formato is not None:
                     campos.append("id_formato = %s")
                     valores.append(_get_or_create_formato(nombre_formato, cur))
+                if descripcion is not None:
+                    campos.append("descripcion = %s")
+                    valores.append(descripcion)
                 if campos:
                     valores.append(isbn)
                     cur.execute(f"UPDATE libros SET {', '.join(campos)} WHERE isbn = %s", valores)

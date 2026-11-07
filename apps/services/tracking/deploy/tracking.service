@@ -1,13 +1,14 @@
 # Unidad systemd del microservicio tracking (gunicorn en 0.0.0.0:5900).
-# NO la instala scripts/levantar_servicios.sh: se instala a mano (VMComandos.md, seccion 23)
-# sustituyendo __USER__ y __REPO_DIR__. tracking no usa .env, PostgreSQL ni Redis.
+# scripts/levantar_servicios.sh la instala en /etc/systemd/system/tracking.service
+# sustituyendo __USER__ y __REPO_DIR__. El .env del servicio lo carga la app.
 #
-# 1 worker + hilos (gthread): la flota vive en memoria del proceso, y cada conexion
-# WebSocket (/ws) ocupa un hilo mientras esta abierta. Con --workers > 1 cada proceso
-# tendria su propia flota y los mapas no verian a todos los camiones.
+# 1 worker + hilos (gthread): la difusion de eventos a los WebSocket vive en memoria
+# del proceso, y cada conexion WebSocket (/ws) ocupa un hilo mientras esta abierta.
+# Con --workers > 1 un cliente conectado a un proceso no veria las posiciones que
+# llegan a otro, y el hilo de tareas correria duplicado.
 [Unit]
 Description=Library - microservicio tracking GPS (puerto 5900)
-After=network-online.target
+After=network-online.target postgresql.service redis.service valkey.service
 Wants=network-online.target
 
 [Service]

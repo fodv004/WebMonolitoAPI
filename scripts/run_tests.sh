@@ -44,7 +44,7 @@ correr() {    # correr <nombre> <carpeta de la suite> <interprete>
 
 py_users="$(preparar "$SERVICES_DIR/users")"
 correr common "$SERVICES_DIR/common" "$py_users"
-for suite in login library_soap_service users authors pedidos pagos; do
+for suite in login library_soap_service users authors pedidos pagos tracking; do
     correr "$suite" "$SERVICES_DIR/$suite" "$(preparar "$SERVICES_DIR/$suite")"
 done
 correr Python_app "$REPO_DIR/apps/Python_app" "$py_users"

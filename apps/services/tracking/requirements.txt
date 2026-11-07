@@ -1,5 +1,10 @@
-flask>=3.0
+Flask==3.0.3
 flask-sock>=0.7
-
+flask-cors==4.0.1
+psycopg[binary]==3.2.3
+python-dotenv==1.0.1
+PyJWT==2.10.1
+redis==5.2.1
+requests==2.32.3
 # Para correrlo en la VM como servicio (1 worker + hilos, ver deploy/tracking.service).
-gunicorn>=23.0
+gunicorn==23.0.0

@@ -1,0 +1,4 @@
+# Solo para simulador_envios.py (sin ventana; es lo que corre en la VM).
+# La GPSapp con ventana (main.py) sigue usando requirements.txt.
+websocket-client>=1.8
+python-dotenv==1.0.1

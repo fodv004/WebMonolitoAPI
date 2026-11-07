@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
 # scripts/estado_servicios.sh
-# Muestra el systemctl status de los 6 microservicios y hace curl a
+# Muestra el systemctl status de los 7 microservicios y hace curl a
 # cada GET /health. Termina con codigo 1 si alguno no responde 200.
 #
 # Uso:
@@ -13,7 +13,7 @@ set -uo pipefail
 
 HOST="${HOST:-127.0.0.1}"
 VERBOSO="${1:-}"
-SERVICIOS=(login:5000 books:5001 users:5002 authors:5003 pedidos:5004 pagos:5005)
+SERVICIOS=(login:5000 books:5001 users:5002 authors:5003 pedidos:5004 pagos:5005 tracking:5900)
 fallos=0
 
 for entrada in "${SERVICIOS[@]}"; do
@@ -43,7 +43,7 @@ done
 
 printf '\n'
 if [ "$fallos" -eq 0 ]; then
-    echo "Los 6 servicios responden 200 en /health."
+    echo "Los ${#SERVICIOS[@]} servicios responden 200 en /health."
 else
     echo "$fallos servicio(s) NO responden 200. Revisa: journalctl -u <servicio> -n 50 --no-pager"
     exit 1

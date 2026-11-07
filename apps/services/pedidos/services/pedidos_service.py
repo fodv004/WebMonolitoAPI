@@ -40,6 +40,7 @@ TRANSICIONES = {
 }
 ACTOR_EXPIRACION = "sistema:expiracion"
 ACTOR_PAGOS = "servicio:pagos"
+ACTOR_TRACKING = "service:tracking"
 
 
 class Actor:
@@ -340,10 +341,13 @@ def cambiar_estado_admin(actor, pedido_id, datos):
 
 
 def cambiar_estado_interno(pedido_id, datos):
-    """PATCH /pedidos/internal/{id}/estado: el servicio pagos marca PAGADO (o CANCELADO si reembolsa)."""
-    nuevo = validators.estado(validators.cuerpo(datos).get("estado"), (PAGADO, CANCELADO))
+    """PATCH /pedidos/internal/{id}/estado: el servicio pagos marca PAGADO (o CANCELADO si reembolsa)
+    y el servicio tracking marca ENVIADO (solo desde PAGADO) y ENTREGADO (solo desde ENVIADO);
+    TRANSICIONES impone esos origenes."""
+    nuevo = validators.estado(validators.cuerpo(datos).get("estado"), (PAGADO, CANCELADO, ENVIADO, ENTREGADO))
+    actor = ACTOR_TRACKING if nuevo in (ENVIADO, ENTREGADO) else ACTOR_PAGOS
     with repository.unit_of_work() as repo:
-        _cambiar_estado(repo, _pedido_bloqueado(repo, pedido_id), nuevo, ACTOR_PAGOS)
+        _cambiar_estado(repo, _pedido_bloqueado(repo, pedido_id), nuevo, actor)
         resultado = _completo(repo, pedido_id)
     _olvidar_reserva(pedido_id)
     return resultado

@@ -1,0 +1,20 @@
+# Unidad systemd del simulador de envios (tools/gps_simulator/simulador_envios.py).
+# NO la instala scripts/levantar_servicios.sh: se instala a mano sustituyendo
+# __USER__ y __REPO_DIR__. Lee tools/gps_simulator/.env (TRACKING_URL,
+# TRACKING_WS_URL, INTERNAL_API_KEY, DURACION_RUTA_SEGUNDOS...).
+[Unit]
+Description=Library - simulador GPS de envios (cliente de tracking)
+After=network-online.target tracking.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REPO_DIR__/tools/gps_simulator
+ExecStart=__REPO_DIR__/tools/gps_simulator/.venv/bin/python simulador_envios.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

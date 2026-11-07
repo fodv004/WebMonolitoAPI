@@ -11,7 +11,7 @@ Endpoints de pedidos. Solo traducen HTTP <-> services/.
   PATCH  /pedidos/<id>/estado            JWT + admin    ENVIADO | ENTREGADO
   DELETE /pedidos/<id>                   JWT + admin    borrado logico (solo CANCELADO o EXPIRADO)
   GET    /pedidos/internal/<id>          X-Internal-Key para el servicio pagos
-  PATCH  /pedidos/internal/<id>/estado   X-Internal-Key PAGADO | CANCELADO
+  PATCH  /pedidos/internal/<id>/estado   X-Internal-Key PAGADO | CANCELADO (pagos), ENVIADO | ENTREGADO (tracking)
 
 El stock es libros.stock: lo reserva y lo libera books (endpoints internos) y el admin lo
 edita con PATCH /books/<isbn>.

@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # ============================================================
 # scripts/levantar_servicios.sh
-# Deja corriendo en la VM los 6 microservicios (login, books, users,
-# authors, pedidos, pagos) como unidades systemd con gunicorn:
+# Deja corriendo en la VM los 7 microservicios (login, books, users,
+# authors, pedidos, pagos, tracking) como unidades systemd con gunicorn:
 #
 #   1. Crea el .venv de cada servicio e instala sus dependencias.
 #   2. Verifica que cada servicio tenga su .env (lo crea desde
 #      .env.example y se detiene para que lo completes).
 #   3. Ejecuta las migraciones apps/services/*/sql/NNN_*.sql.
-#   4. Instala, activa y reinicia las 6 unidades systemd.
+#   4. Instala, activa y reinicia las 7 unidades systemd.
+#
+# tracking (Flask-Sock, WebSocket) usa la misma mecanica: su unidad
+# deploy/tracking.service fija gunicorn con 1 worker gthread y varios hilos.
+# El simulador de envios (tools/gps_simulator) NO se instala aqui: tiene su
+# propia unidad, tools/gps_simulator/deploy/gps-simulator.service.
 #
 # Uso (en la VM, desde cualquier carpeta; pide sudo solo para systemd):
 #   bash scripts/levantar_servicios.sh
@@ -30,9 +35,9 @@ SERVICES_DIR="$REPO_DIR/apps/services"
 PYTHON="${PYTHON:-python3}"
 RUN_USER="${RUN_USER:-$(id -un)}"
 
-SERVICIOS=(login books users authors pedidos pagos)
+SERVICIOS=(login books users authors pedidos pagos tracking)
 declare -A DIRECTORIO=([login]=login [books]=library_soap_service [users]=users
-                       [authors]=authors [pedidos]=pedidos [pagos]=pagos)
+                       [authors]=authors [pedidos]=pedidos [pagos]=pagos [tracking]=tracking)
 
 titulo() { printf '\n==== %s ====\n' "$1"; }
 
@@ -84,7 +89,7 @@ if [ "${#pendientes[@]}" -gt 0 ]; then
     printf '  - %s\n' "${pendientes[@]}"
     exit 1
 fi
-echo "Los 6 .env existen, comparten JWT_SECRET_KEY y tienen REDIS_URL."
+echo "Los ${#SERVICIOS[@]} .env existen, comparten JWT_SECRET_KEY y tienen REDIS_URL."
 
 # ------------------------------------------------------------ 3. migraciones
 titulo "3/4 Migraciones"
