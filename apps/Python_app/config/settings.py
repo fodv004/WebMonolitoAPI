@@ -1,18 +1,23 @@
 """
 config/settings.py
-Configuracion de la app (IP de la VM, puerto de cada microservicio,
-protocolo y semaforo). Se guarda en config.json junto al programa y se
-aplica sin reiniciar: los clientes HTTP leen este objeto en cada peticion.
+Configuracion de la app: URL base del API Gateway, certificado (si el
+gateway es HTTPS) y semaforo. Se guarda en config.json junto al programa y
+se aplica sin reiniciar: los clientes HTTP leen este objeto en cada peticion.
 
 Nunca se guardan tokens aqui: el JWT y el refresh token viven solo en
 memoria (session.py).
 
-URL de cada servicio:
-  HTTP  (default) -> http://<IP>:<puerto>
-  HTTPS           -> https://<IP>/api/<servicio>   (proxy inverso en la VM)
+Todas las peticiones pasan por el API Gateway (nginx) con UNA sola URL base:
+  http://IP_EXTERNA:8080/catalogo/api
+y el gateway enruta por prefijo a cada microservicio (/login, /books,
+/users, /authors, /pedidos, /pagos, /envios, /ws...).
+
+La variable de entorno EG4_GATEWAY_URL, si existe, tiene prioridad sobre
+config.json.
 """
 import copy
 import json
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -20,16 +25,25 @@ _RAIZ = Path(__file__).resolve().parent.parent
 ARCHIVO = _RAIZ / "config.json"
 _ARCHIVO_ANTERIOR = _RAIZ / "local_storage.json"   # formato viejo: solo se lee para heredar la IP
 
+ENV_GATEWAY_URL = "EG4_GATEWAY_URL"
+GATEWAY_PUERTO = 8080
+GATEWAY_PREFIJO = "/catalogo/api"
+
 SERVICIOS = ("login", "books", "users", "authors", "pedidos", "pagos")
 ETIQUETAS = {"login": "Login", "books": "Libros", "users": "Usuarios",
              "authors": "Autores", "pedidos": "Pedidos", "pagos": "Pagos"}
 
 TIMEOUT_HTTP = 5  # segundos, para todas las peticiones a los microservicios
 
+
+def gateway_de_host(host):
+    """URL del gateway para una IP/nombre: http://<host>:8080/catalogo/api."""
+    return f"http://{host}:{GATEWAY_PUERTO}{GATEWAY_PREFIJO}"
+
+
 VALORES_POR_DEFECTO = {
-    "host": "127.0.0.1",   # no "localhost": en Windows prueba antes IPv6 y cada peticion tarda ~2 s
-    "protocolo": "http",
-    "puertos": {"login": 5000, "books": 5001, "users": 5002, "authors": 5003, "pedidos": 5004, "pagos": 5005},
+    # 127.0.0.1 y no "localhost": en Windows prueba antes IPv6 y cada peticion tarda ~2 s
+    "gateway_url": gateway_de_host("127.0.0.1"),
     "verificar_certificado": True,
     "certificado": "",
     "semaforo_intervalo_s": 10,
@@ -47,27 +61,24 @@ def _entero(valor, nombre, minimo, maximo):
     return numero
 
 
+def normalizar_gateway_url(valor):
+    """Valida la URL del gateway y la devuelve sin "/" final (lanza ValueError)."""
+    url = str(valor or "").strip().rstrip("/")
+    partes = urlparse(url)
+    if partes.scheme not in ("http", "https") or not partes.hostname or any(c in url for c in " ?#@"):
+        raise ValueError("La URL del gateway no es válida "
+                         "(ejemplo: http://34.51.58.130:8080/catalogo/api).")
+    try:
+        partes.port
+    except ValueError:
+        raise ValueError("El puerto de la URL del gateway no es válido.")
+    return url
+
+
 def validar(datos):
     """Devuelve una copia normalizada de `datos` o lanza ValueError con un mensaje para el usuario."""
-    host = str(datos.get("host", "")).strip()
-    if "://" in host:
-        host = urlparse(host).hostname or ""
-    host = host.strip("/")
-    if not host or any(c in host for c in " /?#@"):
-        raise ValueError("La IP o nombre de la VM no es válido (ejemplo: 34.51.58.130).")
-
-    protocolo = str(datos.get("protocolo", "http")).lower()
-    if protocolo not in ("http", "https"):
-        raise ValueError("El protocolo debe ser HTTP o HTTPS.")
-
-    puertos_recibidos = datos.get("puertos") or {}
-    puertos = {s: _entero(puertos_recibidos.get(s, VALORES_POR_DEFECTO["puertos"][s]),
-                          f"El puerto de {ETIQUETAS[s]}", 1, 65535) for s in SERVICIOS}
-
     return {
-        "host": host,
-        "protocolo": protocolo,
-        "puertos": puertos,
+        "gateway_url": normalizar_gateway_url(datos.get("gateway_url")),
         "verificar_certificado": bool(datos.get("verificar_certificado", True)),
         "certificado": str(datos.get("certificado") or "").strip(),
         "semaforo_intervalo_s": _entero(datos.get("semaforo_intervalo_s", 10), "El intervalo del semáforo", 2, 3600),
@@ -91,20 +102,33 @@ class AppConfig:
     # ------------------------------------------------------------ disco
     @classmethod
     def cargar(cls, archivo=None):
-        archivo = archivo or ARCHIVO
+        config = cls._cargar_archivo(archivo or ARCHIVO)
+        desde_entorno = os.environ.get(ENV_GATEWAY_URL, "").strip()
+        if desde_entorno:
+            try:
+                config.datos["gateway_url"] = normalizar_gateway_url(desde_entorno)
+            except ValueError:
+                print(f"[config] {ENV_GATEWAY_URL} no es una URL válida; se ignora: {desde_entorno}", flush=True)
+        return config
+
+    @classmethod
+    def _cargar_archivo(cls, archivo):
         base = copy.deepcopy(VALORES_POR_DEFECTO)
         try:
             guardado = json.loads(archivo.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            base["host"] = _host_anterior() or base["host"]
+            host = _host_anterior()
+            if host:
+                base["gateway_url"] = gateway_de_host(host)
             return cls(base)
         except (OSError, ValueError):
             return cls()
         if not isinstance(guardado, dict):
             return cls()
-        base.update({k: v for k, v in guardado.items() if k in base and k != "puertos"})
-        if isinstance(guardado.get("puertos"), dict):
-            base["puertos"].update({k: v for k, v in guardado["puertos"].items() if k in base["puertos"]})
+        base.update({k: v for k, v in guardado.items() if k in base})
+        if "gateway_url" not in guardado and guardado.get("host"):
+            # config.json de la version anterior (IP + puerto por servicio): se pasa al gateway.
+            base["gateway_url"] = gateway_de_host(str(guardado["host"]).strip())
         try:
             return cls(base)
         except ValueError:
@@ -125,12 +149,12 @@ class AppConfig:
 
     @property
     def es_https(self):
-        return self.datos["protocolo"] == "https"
+        return self.datos["gateway_url"].startswith("https://")
 
-    def base_url(self, servicio):
-        if self.es_https:
-            return f"https://{self.datos['host']}/api/{servicio}"
-        return f"http://{self.datos['host']}:{self.datos['puertos'][servicio]}"
+    def base_url(self, servicio=None):
+        """URL base de cualquier servicio: siempre la del gateway. Cada cliente agrega
+        su prefijo (/login, /books, /users, ...) y el gateway enruta."""
+        return self.datos["gateway_url"]
 
     def verify(self):
         """Valor del parametro `verify` de requests: False, la ruta del .crt o True (CAs del sistema)."""

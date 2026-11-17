@@ -3,8 +3,8 @@ widgets/semaforos.py
 Panel de semaforos, siempre visible: una luz por microservicio (login,
 books, users, authors, pedidos, pagos).
 
-  Verde  -> GET /health respondio 200 con status "ok".
-  Rojo   -> cualquier otro caso (sin respuesta, timeout, 503, status distinto).
+  Verde  -> el servicio respondio a traves del API Gateway (ver api/health.py).
+  Rojo   -> sin respuesta, timeout, 404 o 5xx (502/503/504 del gateway).
   Gris   -> todavia no se ha revisado.
 
 Cada revision corre en su propio hilo y el resultado regresa al hilo de

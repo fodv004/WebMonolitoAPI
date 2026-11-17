@@ -46,9 +46,11 @@ proyecto (login, books, users, authors, pedidos y pagos), que corren en la VM.
   - Si el semáforo de Usuarios está en rojo la pantalla se deshabilita con un aviso y se reactiva sola al volver.
   - Cambiar tu propia contraseña, correo o rol cierra tus sesiones: la app te regresa al login y te explica por qué.
 - **Configuración** (se guarda en `config.json`, sin tokens, y se aplica sin reiniciar):
-  - IP de la VM y puerto de cada servicio.
-  - Protocolo **HTTP (por defecto)** → `http://<IP>:<puerto>`, o **HTTPS** → `https://<IP>/api/<servicio>`.
-  - Con HTTPS: casilla *Verificar certificado* y selector del archivo `.crt`, con advertencia visible si se desactiva.
+  - **URL del API Gateway** (una sola para todos los servicios): `http://IP_EXTERNA:8080/catalogo/api`.
+    El gateway (nginx) enruta por prefijo: `/login`… → login, `/books`… → books, `/users` y `/roles` → users,
+    `/authors` → authors, `/pedidos` → pedidos, `/pagos` → pagos.
+  - La variable de entorno `EG4_GATEWAY_URL`, si existe, tiene prioridad sobre `config.json`.
+  - Si la URL es `https://`: casilla *Verificar certificado* y selector del archivo `.crt`, con advertencia visible si se desactiva.
   - Intervalo y timeout del semáforo.
   - *Probar conexión* (prueba los valores del formulario sin guardarlos) y *Restaurar valores por defecto*.
 - **Log HTTP en consola** de cada petición y respuesta, **sin tokens ni contraseñas**.
@@ -82,13 +84,13 @@ Python_app/
 │   ├── semaforos.py  sidebar.py  tooltip.py
 │   ├── dialogs.py          # formulario modal genérico
 ├── config/
-│   └── settings.py         # config.json: carga, validación, URL de cada servicio
+│   └── settings.py         # config.json: carga, validación, URL del gateway
 └── tests/
     └── test_cliente.py     # pytest (sin ventana): configuración, cliente HTTP, sesión, semáforo
 ```
 
-`config.json` se crea al guardar la configuración. La primera vez hereda la IP que ya tenías en
-`local_storage.json` (el archivo de la versión anterior, que ya no se usa).
+`config.json` se crea al guardar la configuración. Si encuentra un `config.json` viejo (IP + puertos) o el
+`local_storage.json` de la versión anterior, toma esa IP y arma `http://<IP>:8080/catalogo/api`.
 
 ## Ejecutar
 
@@ -99,7 +101,9 @@ python main.py
 ```
 
 Lánzala desde una terminal para ver el log de peticiones y respuestas. Abre **Configuración** (desde el login o el
-menú lateral), escribe la IP de la VM y pulsa **Guardar**: los semáforos deben ponerse en verde.
+menú lateral), escribe la URL del gateway (`http://IP_EXTERNA:8080/catalogo/api`) y pulsa **Guardar**: los
+semáforos deben ponerse en verde. El semáforo sondea una ruta GET de cada servicio a través del gateway
+(el `/health` interno de cada servicio no se publica en el gateway).
 
 Pruebas:
 
@@ -110,8 +114,8 @@ python -m pytest -q tests
 
 ## Requisitos previos
 
-Los 6 microservicios levantados en la VM (`scripts/levantar_servicios.sh`, ver `VMComandos.md` en la raíz) y los
-puertos 5000–5005 abiertos hacia tu máquina. Para iniciar sesión necesitas una cuenta confirmada; para modificar
+Los 6 microservicios y el API Gateway levantados en la VM (`scripts/levantar_servicios.sh`, ver `VMComandos.md`
+en la raíz) y el puerto 8080 del gateway abierto hacia tu máquina. Para iniciar sesión necesitas una cuenta confirmada; para modificar
 libros, una con rol admin (el admin inicial se crea con `ADMIN_EMAIL` / `ADMIN_PASSWORD` del `.env` de users).
 
 `instrucciones.txt` describe la versión anterior de la app (2 servicios); se conserva como referencia histórica.

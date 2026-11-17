@@ -1,12 +1,11 @@
 """
 screens/config_screen.py
-Pantalla de configuracion: IP de la VM, puerto de cada microservicio,
-protocolo (HTTP por default / HTTPS) y semaforo. Se guarda en config.json
-(sin tokens: el JWT vive solo en memoria) y se aplica sin reiniciar la app.
+Pantalla de configuracion: URL base del API Gateway y semaforo. Se guarda
+en config.json (sin tokens: el JWT vive solo en memoria) y se aplica sin
+reiniciar la app.
 
-  HTTP  -> http://<IP>:<puerto>
-  HTTPS -> https://<IP>/api/<servicio>, con la opcion de verificar el
-           certificado contra un archivo .crt.
+  Gateway -> http://IP_EXTERNA:8080/catalogo/api  (todas las peticiones)
+  Si la URL es https://, se puede verificar el certificado contra un .crt.
 """
 import tkinter as tk
 from tkinter import filedialog, ttk
@@ -25,35 +24,13 @@ class ConfigScreen(ttk.Frame):
         super().__init__(parent)
         self.app = app
 
-        tarjeta = theme.tarjeta_centrada(self, "Configuración", "Conexión con los microservicios de la VM")
+        tarjeta = theme.tarjeta_centrada(self, "Configuración", "Conexión con los microservicios (API Gateway)")
 
-        self.host_var = tk.StringVar()
-        theme.campo(tarjeta, 3, "IP de la VM", self.host_var)
-
-        # ---- protocolo
-        ttk.Label(tarjeta, text="Protocolo", style="Card.TLabel").grid(row=4, column=0, sticky="e", padx=(0, 12), pady=6)
-        self.protocolo_var = tk.StringVar(value="http")
-        protocolos = ttk.Frame(tarjeta, style="CardInner.TFrame")
-        protocolos.grid(row=4, column=1, sticky="w")
-        ttk.Radiobutton(protocolos, text="HTTP (por defecto)", value="http", variable=self.protocolo_var,
-                        style="Card.TRadiobutton", command=self._actualizar_estado_https).pack(side="left")
-        ttk.Radiobutton(protocolos, text="HTTPS", value="https", variable=self.protocolo_var,
-                        style="Card.TRadiobutton", command=self._actualizar_estado_https).pack(side="left", padx=(16, 0))
-
-        # ---- puertos (3 columnas x 2 filas)
-        ttk.Label(tarjeta, text="Puertos", style="Card.TLabel").grid(row=5, column=0, sticky="ne", padx=(0, 12), pady=8)
-        puertos = ttk.Frame(tarjeta, style="CardInner.TFrame")
-        puertos.grid(row=5, column=1, sticky="w", pady=4)
-        self.puerto_vars = {}
-        self._entradas_puerto = []
-        for i, servicio in enumerate(SERVICIOS):
-            fila, columna = divmod(i, 3)
-            ttk.Label(puertos, text=ETIQUETAS[servicio], style="Card.TLabel").grid(
-                row=fila, column=columna * 2, sticky="e", padx=(0 if columna == 0 else 14, 6), pady=3)
-            self.puerto_vars[servicio] = tk.StringVar()
-            entrada = ttk.Entry(puertos, textvariable=self.puerto_vars[servicio], width=7)
-            entrada.grid(row=fila, column=columna * 2 + 1, pady=3)
-            self._entradas_puerto.append(entrada)
+        self.gateway_var = tk.StringVar()
+        theme.campo(tarjeta, 3, "URL del gateway", self.gateway_var)
+        self.gateway_var.trace_add("write", lambda *_: self._actualizar_estado_https())
+        ttk.Label(tarjeta, text="Ejemplo: http://IP_EXTERNA:8080/catalogo/api", style="Subtitulo.TLabel").grid(
+            row=4, column=1, sticky="w")
 
         # ---- HTTPS
         self.verificar_var = tk.BooleanVar(value=True)
@@ -107,10 +84,7 @@ class ConfigScreen(ttk.Frame):
         self.estado_var.set("")
 
     def _llenar(self, datos):
-        self.host_var.set(datos["host"])
-        self.protocolo_var.set(datos["protocolo"])
-        for servicio in SERVICIOS:
-            self.puerto_vars[servicio].set(str(datos["puertos"][servicio]))
+        self.gateway_var.set(datos["gateway_url"])
         self.verificar_var.set(datos["verificar_certificado"])
         self.certificado_var.set(datos["certificado"])
         self.intervalo_var.set(str(datos["semaforo_intervalo_s"]))
@@ -120,9 +94,7 @@ class ConfigScreen(ttk.Frame):
     def _leer(self):
         """Datos del formulario ya validados (lanza ValueError con el mensaje para el usuario)."""
         return validar({
-            "host": self.host_var.get(),
-            "protocolo": self.protocolo_var.get(),
-            "puertos": {servicio: var.get() for servicio, var in self.puerto_vars.items()},
+            "gateway_url": self.gateway_var.get(),
             "verificar_certificado": self.verificar_var.get(),
             "certificado": self.certificado_var.get(),
             "semaforo_intervalo_s": self.intervalo_var.get(),
@@ -130,15 +102,14 @@ class ConfigScreen(ttk.Frame):
         })
 
     def _actualizar_estado_https(self):
-        https = self.protocolo_var.get() == "https"
+        if not hasattr(self, "aviso_var"):
+            return                    # el trace de la URL se dispara antes de crear el resto del formulario
+        https = self.gateway_var.get().strip().lower().startswith("https://")
         verificar = self.verificar_var.get()
         self.check_verificar.state(["!disabled"] if https else ["disabled"])
         estado_certificado = ["!disabled"] if https and verificar else ["disabled"]
         self.entrada_certificado.state(estado_certificado)
         self.boton_certificado.state(estado_certificado)
-        # Con HTTPS los puertos no se usan: todo entra por https://<IP>/api/<servicio>.
-        for entrada in self._entradas_puerto:
-            entrada.state(["disabled"] if https else ["!disabled"])
         self.aviso_var.set(_AVISO_SIN_VERIFICAR if https and not verificar else "")
 
     def _elegir_certificado(self):
@@ -150,7 +121,7 @@ class ConfigScreen(ttk.Frame):
 
     # ------------------------------------------------------------ acciones
     def _probar(self):
-        """Revisa /health de los 6 servicios con los valores del formulario (aunque no esten guardados)."""
+        """Sondea los 6 servicios por el gateway con los valores del formulario (aunque no esten guardados)."""
         try:
             prueba = AppConfig(self._leer())
         except ValueError as e:

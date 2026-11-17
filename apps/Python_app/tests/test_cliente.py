@@ -55,7 +55,7 @@ def servidor(monkeypatch):
 
 @pytest.fixture
 def config():
-    return AppConfig({"host": "34.51.58.130"})
+    return AppConfig({"gateway_url": "http://34.51.58.130:8080/catalogo/api"})
 
 
 def _sesion_iniciada(config):
@@ -67,17 +67,16 @@ def _sesion_iniciada(config):
 
 
 # ------------------------------------------------------------------ configuracion
-def test_http_por_defecto_y_urls():
+def test_por_defecto_todo_va_al_gateway():
     config = AppConfig()
-    assert config["protocolo"] == "http" and config["host"] == "127.0.0.1"
-    assert config.base_url("login") == "http://127.0.0.1:5000"
-    assert config.base_url("pagos") == "http://127.0.0.1:5005"
+    assert config["gateway_url"] == "http://127.0.0.1:8080/catalogo/api"
+    assert config.base_url("login") == config.base_url("pagos") == "http://127.0.0.1:8080/catalogo/api"
     assert config["semaforo_intervalo_s"] == 10 and settings.TIMEOUT_HTTP == 5
 
 
-def test_https_usa_api_servicio_y_verify():
-    config = AppConfig({"host": "34.51.58.130", "protocolo": "https"})
-    assert config.base_url("books") == "https://34.51.58.130/api/books"
+def test_gateway_https_y_verify():
+    config = AppConfig({"gateway_url": "https://34.51.58.130:8443/catalogo/api/"})
+    assert config.base_url("books") == "https://34.51.58.130:8443/catalogo/api" and config.es_https
     assert config.verify() is True
     config.aplicar({**config.datos, "certificado": "C:/certs/vm.crt"})
     assert config.verify() == "C:/certs/vm.crt"
@@ -86,37 +85,55 @@ def test_https_usa_api_servicio_y_verify():
 
 
 def test_validacion_de_la_configuracion():
-    assert AppConfig({"host": " http://10.0.0.5:5000/ "})["host"] == "10.0.0.5"
-    for datos in ({"host": ""}, {"host": "a b"}, {"host": "x", "protocolo": "ftp"},
-                  {"host": "x", "puertos": {"login": "abc"}}, {"host": "x", "puertos": {"login": 70000}},
-                  {"host": "x", "semaforo_intervalo_s": 0}, {"host": "x", "semaforo_timeout_s": "nunca"}):
+    assert AppConfig({"gateway_url": " http://34.51.58.130:8080/catalogo/api/ "})["gateway_url"] == "http://34.51.58.130:8080/catalogo/api"
+    for datos in ({"gateway_url": ""}, {"gateway_url": "34.51.58.130"}, {"gateway_url": "ftp://x/catalogo/api"},
+                  {"gateway_url": "http://a b:8080"}, {"gateway_url": "http://x:abc/catalogo/api"},
+                  {"gateway_url": "http://x", "semaforo_intervalo_s": 0},
+                  {"gateway_url": "http://x", "semaforo_timeout_s": "nunca"}):
         with pytest.raises(ValueError):
             AppConfig(datos)
 
 
-def test_guardar_y_cargar_sin_tokens(tmp_path):
+def test_guardar_y_cargar_sin_tokens(tmp_path, monkeypatch):
+    monkeypatch.delenv(settings.ENV_GATEWAY_URL, raising=False)
     archivo = tmp_path / "config.json"
-    config = AppConfig({"host": "10.0.0.5", "protocolo": "https", "puertos": {"users": 6002}})
+    config = AppConfig({"gateway_url": "http://10.0.0.5:8080/catalogo/api"})
     config.datos["token"] = "no-debe-guardarse"
     config.guardar(archivo)
 
     guardado = json.loads(archivo.read_text(encoding="utf-8"))
     assert set(guardado) == set(settings.VALORES_POR_DEFECTO) and "token" not in archivo.read_text(encoding="utf-8")
-    cargada = AppConfig.cargar(archivo)
-    assert cargada["host"] == "10.0.0.5" and cargada["puertos"]["users"] == 6002 and cargada["puertos"]["login"] == 5000
+    assert AppConfig.cargar(archivo)["gateway_url"] == "http://10.0.0.5:8080/catalogo/api"
 
 
-def test_config_corrupta_vuelve_a_los_valores_por_defecto(tmp_path):
+def test_variable_de_entorno_tiene_prioridad(tmp_path, monkeypatch):
+    archivo = tmp_path / "config.json"
+    AppConfig({"gateway_url": "http://10.0.0.5:8080/catalogo/api"}).guardar(archivo)
+    monkeypatch.setenv(settings.ENV_GATEWAY_URL, "http://10.0.0.9:8080/catalogo/api/")
+    assert AppConfig.cargar(archivo)["gateway_url"] == "http://10.0.0.9:8080/catalogo/api"
+
+
+def test_config_vieja_con_puertos_pasa_al_gateway(tmp_path, monkeypatch):
+    monkeypatch.delenv(settings.ENV_GATEWAY_URL, raising=False)
+    archivo = tmp_path / "config.json"
+    archivo.write_text(json.dumps({"host": "10.0.0.5", "protocolo": "http", "puertos": {"login": 5000}}),
+                       encoding="utf-8")
+    assert AppConfig.cargar(archivo)["gateway_url"] == "http://10.0.0.5:8080/catalogo/api"
+
+
+def test_config_corrupta_vuelve_a_los_valores_por_defecto(tmp_path, monkeypatch):
+    monkeypatch.delenv(settings.ENV_GATEWAY_URL, raising=False)
     archivo = tmp_path / "config.json"
     archivo.write_text("{esto no es json", encoding="utf-8")
     assert AppConfig.cargar(archivo).datos == settings.VALORES_POR_DEFECTO
 
 
 def test_primera_ejecucion_hereda_la_ip_de_local_storage(tmp_path, monkeypatch):
+    monkeypatch.delenv(settings.ENV_GATEWAY_URL, raising=False)
     anterior = tmp_path / "local_storage.json"
-    anterior.write_text(json.dumps({"login_base_url": "http://34.51.58.130:5000"}), encoding="utf-8")
+    anterior.write_text(json.dumps({"login_base_url": "http://34.51.58.130:8080/catalogo/api"}), encoding="utf-8")
     monkeypatch.setattr(settings, "_ARCHIVO_ANTERIOR", anterior)
-    assert AppConfig.cargar(tmp_path / "config.json")["host"] == "34.51.58.130"
+    assert AppConfig.cargar(tmp_path / "config.json")["gateway_url"] == "http://34.51.58.130:8080/catalogo/api"
 
 
 # ------------------------------------------------------------------ cliente HTTP
@@ -126,7 +143,7 @@ def test_authorization_automatico_timeout_y_verify(servidor, config):
     assert books.list_books() == []
 
     prep, kwargs = servidor.recibidas[0]
-    assert prep.url == "http://34.51.58.130:5001/books?format=json"
+    assert prep.url == "http://34.51.58.130:8080/catalogo/api/books?format=json"
     assert prep.headers["Authorization"] == "Bearer jwt-viejo"
     assert kwargs["timeout"] == 5 and kwargs["verify"] is True
 
@@ -235,7 +252,7 @@ def test_el_log_de_consola_no_muestra_tokens_ni_passwords(servidor, config, caps
     consola = capsys.readouterr().out
     for secreto in ("PASSWORD-SECRETO", "JWT-SECRETO", "RT-SECRETO", "jwt-viejo"):
         assert secreto not in consola
-    assert "POST http://34.51.58.130:5000/login" in consola and "ana@correo.com" in consola
+    assert "POST http://34.51.58.130:8080/catalogo/api/login" in consola and "ana@correo.com" in consola
     assert "Authorization: Bearer ********" in consola
 
 
@@ -257,17 +274,22 @@ class _Health:
         return self.respuesta
 
 
-def test_semaforo_verde_solo_con_200_y_status_ok(monkeypatch, config):
-    falso = _Health(monkeypatch, _respuesta(200, {"service": "users", "status": "ok", "db": "ok", "redis": "ok"}))
+@pytest.mark.parametrize("respuesta", [
+    _respuesta(200, {"items": []}),
+    _respuesta(401, {"error": "TOKEN_AUSENTE"}),     # el servicio contesto: esta vivo
+])
+def test_semaforo_verde_si_el_servicio_responde_por_el_gateway(monkeypatch, config, respuesta):
+    falso = _Health(monkeypatch, respuesta)
     r = health.revisar(config, "users", 3)
-    assert r["ok"] and r["db"] == "ok" and r["redis"] == "ok" and r["ms"] is not None and r["hora"] is not None
-    assert falso.llamadas[0][0] == "http://34.51.58.130:5002/health" and falso.llamadas[0][1]["timeout"] == 3
+    assert r["ok"] and r["ms"] is not None and r["hora"] is not None
+    assert falso.llamadas[0][0] == "http://34.51.58.130:8080/catalogo/api/roles" and falso.llamadas[0][1]["timeout"] == 3
 
 
 @pytest.mark.parametrize("respuesta", [
-    _respuesta(503, {"service": "users", "status": "error", "db": "ok", "redis": "error"}),
-    _respuesta(200, {"status": "error"}),
-    _respuesta(200, {"otra": "cosa"}),
+    _respuesta(502, {}),
+    _respuesta(503, {"service": "users", "status": "error"}),
+    _respuesta(504, {}),
+    _respuesta(404, {}),
     requests.ConnectionError("rechazada"),
     requests.Timeout("lento"),
 ])
@@ -286,7 +308,7 @@ def test_users_list_envia_filtros_y_paginacion(servidor, config):
     users.list()
 
     con_filtros, sin_filtros = (prep.url for prep, _ in servidor.recibidas)
-    assert con_filtros.startswith("http://34.51.58.130:5002/users?")
+    assert con_filtros.startswith("http://34.51.58.130:8080/catalogo/api/users?")
     for parte in ("q=ana", "role_id=2", "activo=false", "page=2", "per_page=15", "format=json"):
         assert parte in con_filtros
     assert "q=" not in sin_filtros and "role_id" not in sin_filtros and "activo" not in sin_filtros
@@ -307,7 +329,7 @@ def test_users_rutas_y_cuerpos(servidor, config):
     users.change_email(31, "nueva@correo.com")
     users.change_role(31, 1)
 
-    vistas = [(prep.method, prep.url.split("?")[0].split(":5002")[1], json.loads(prep.body) if prep.body else None)
+    vistas = [(prep.method, prep.url.split("?")[0].split("/catalogo/api")[1], json.loads(prep.body) if prep.body else None)
               for prep, _ in servidor.recibidas]
     assert vistas == [
         ("GET", "/users/me", None),
@@ -330,7 +352,7 @@ def test_el_log_oculta_las_contraseñas_al_cambiarlas(servidor, config, capsys):
     UsersClient(config, _sesion_iniciada(config)).change_password(31, "NUEVA-SECRETA-1", "ACTUAL-SECRETA-1")
     consola = capsys.readouterr().out
     assert "NUEVA-SECRETA-1" not in consola and "ACTUAL-SECRETA-1" not in consola
-    assert "PATCH http://34.51.58.130:5002/users/31/password" in consola
+    assert "PATCH http://34.51.58.130:8080/catalogo/api/users/31/password" in consola
 
 
 # ------------------------------------------------------------------ cliente de authors
@@ -351,7 +373,7 @@ def test_authors_rutas_filtros_y_cuerpos(servidor, config):
     authors.add_book(3, "9780000000003")
     authors.add_book(3, "9780000000003", orden=2)
 
-    vistas = [(prep.method, prep.url.split(":5003")[1], json.loads(prep.body) if prep.body else None)
+    vistas = [(prep.method, prep.url.split("/catalogo/api")[1], json.loads(prep.body) if prep.body else None)
               for prep, _ in servidor.recibidas]
     lista = vistas[0][1]
     assert lista.startswith("/authors?") and all(p in lista for p in ("q=borges", "nacionalidad=Argentina", "page=2", "per_page=15"))
@@ -405,7 +427,7 @@ def test_pedidos_rutas_y_cuerpos(servidor, config):
     pedidos.inventory_set("9780000000004", 3)
     pedidos.inventory_remove("9780000000004")
 
-    vistas = [(prep.method, prep.url.split(":5004")[1].split("?")[0], json.loads(prep.body) if prep.body else None)
+    vistas = [(prep.method, prep.url.split("/catalogo/api")[1].split("?")[0], json.loads(prep.body) if prep.body else None)
               for prep, _ in servidor.recibidas]
     assert vistas == [
         ("GET", "/inventario", None),
@@ -464,7 +486,7 @@ def test_pagos_pagar_envia_la_llave_de_idempotencia_y_nunca_el_monto(servidor, c
     pagos.pay(8, "EFECTIVO", "llave-de-prueba-2", tarjeta="4111111111111111", cvv="123")
 
     con_tarjeta, sin_tarjeta = (prep for prep, _ in servidor.recibidas)
-    assert con_tarjeta.method == "POST" and con_tarjeta.url.startswith("http://34.51.58.130:5005/pagos?")
+    assert con_tarjeta.method == "POST" and con_tarjeta.url.startswith("http://34.51.58.130:8080/catalogo/api/pagos?")
     assert con_tarjeta.headers["Idempotency-Key"] == "llave-de-prueba-1"
     assert con_tarjeta.headers["Authorization"] == "Bearer jwt-viejo"
     assert json.loads(con_tarjeta.body) == {"pedido_id": 7, "metodo": "TARJETA_SIMULADA",
@@ -488,7 +510,7 @@ def test_pagos_rutas_de_consulta_y_de_admin(servidor, config):
     pagos.refund(5, notas="Devolución")
     pagos.delete(5)
 
-    vistas = [(prep.method, prep.url.split(":5005")[1].split("?")[0], json.loads(prep.body) if prep.body else None)
+    vistas = [(prep.method, prep.url.split("/catalogo/api")[1].split("?")[0], json.loads(prep.body) if prep.body else None)
               for prep, _ in servidor.recibidas]
     assert vistas == [
         ("GET", "/pagos", None), ("GET", "/pagos/5", None), ("GET", "/pagos/pedido/7", None),
@@ -509,7 +531,7 @@ def test_el_log_de_consola_no_muestra_la_tarjeta_ni_el_cvv(servidor, config, cap
                                                       tarjeta="4111111111111111", cvv="7391")
     consola = capsys.readouterr().out
     assert "4111111111111111" not in consola and "7391" not in consola
-    assert "POST http://34.51.58.130:5005/pagos" in consola and "Idempotency-Key: llave-de-prueba-1" in consola
+    assert "POST http://34.51.58.130:8080/catalogo/api/pagos" in consola and "Idempotency-Key: llave-de-prueba-1" in consola
     assert '"ultimos4": "1111"' in consola                      # los ultimos 4 si se pueden ver
 
 

@@ -11,6 +11,15 @@
 const { app, BrowserWindow, ipcMain, net } = require("electron");
 const path = require("path");
 
+/**
+ * URL base del API Gateway (nginx). Es el UNICO lugar donde se define el
+ * servidor: todas las llamadas salen por aqui y el gateway enruta por
+ * prefijo (/books -> books, /login -> login, ...).
+ * Se puede sobrescribir con la variable de entorno EG4_GATEWAY_URL.
+ */
+const DEFAULT_GATEWAY_URL = "http://34.51.84.143:8080/catalogo/api";
+const GATEWAY_URL = (process.env.EG4_GATEWAY_URL || DEFAULT_GATEWAY_URL).trim().replace(/\/+$/, "");
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -23,6 +32,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // El preload (sandbox) lee la URL del gateway de process.argv.
+      additionalArguments: [`--gateway-url=${GATEWAY_URL}`],
     },
   });
 

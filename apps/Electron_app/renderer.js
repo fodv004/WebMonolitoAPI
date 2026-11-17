@@ -3,10 +3,14 @@
  * Logica de UI: configuracion (persistida en LocalStorage), carga del
  * catalogo en XML via el proceso principal, y paginacion client-side.
  */
-const STORAGE_KEY = "libreria.catalogConfig.v1";
+// v2: desde el API Gateway la URL base ya no lleva puerto por servicio; se
+// cambia la clave para no reutilizar una URL vieja (http://IP:5001) guardada.
+const STORAGE_KEY = "libreria.catalogConfig.v2";
 
+// La URL base del gateway viene de main.js (EG4_GATEWAY_URL); el endpoint
+// lleva el prefijo del servicio (/books -> microservicio books).
 const DEFAULTS = {
-  baseUrl: "http://34.51.96.249:5001",
+  baseUrl: window.catalogAPI.gatewayUrl || "http://34.51.84.143:8080/catalogo/api",
   endpoint: "/books",
   pageSize: 12,
 };

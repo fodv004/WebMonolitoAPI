@@ -1,14 +1,5 @@
 {
-  "host": "34.51.0.253",
-  "protocolo": "http",
-  "puertos": {
-    "login": 5000,
-    "books": 5001,
-    "users": 5002,
-    "authors": 5003,
-    "pedidos": 5004,
-    "pagos": 5005
-  },
+  "gateway_url": "http://34.51.84.143:8080/catalogo/api",
   "verificar_certificado": true,
   "certificado": "",
   "semaforo_intervalo_s": 10,

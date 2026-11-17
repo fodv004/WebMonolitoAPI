@@ -3,9 +3,17 @@
 Aplicacion de escritorio para Windows 11 que muestra el catalogo de libros
 en tarjetas (imagen, autor(es), ISBN, stock, ano de publicacion, genero y
 precio), consumiendo **exclusivamente XML** desde el microservicio REST de
-la libreria (`GET /books`).
+la libreria (`GET /books`), a traves del **API Gateway** (nginx):
+`http://IP_EXTERNA:8080/catalogo/api/books`.
 
-La URL base y el endpoint son configurables desde la propia aplicacion y se
+La URL base del gateway se define en un solo lugar: `DEFAULT_GATEWAY_URL` en
+`main.js`, o la variable de entorno `EG4_GATEWAY_URL` (tiene prioridad):
+
+```powershell
+$env:EG4_GATEWAY_URL = "http://IP_EXTERNA:8080/catalogo/api"; npm start
+```
+
+La URL base y el endpoint tambien son configurables desde la propia aplicacion y se
 guardan en el equipo mediante `localStorage`, por lo que persisten entre
 sesiones.
 
@@ -41,13 +49,13 @@ sesiones.
    ```
 
 4. Se abrira la ventana del catalogo. Por defecto apunta a
-   `http://34.51.96.249:5001/books`. Para cambiar el servidor:
+   `http://34.51.84.143:8080/catalogo/api/books` (gateway). Para cambiar el servidor:
    - Da clic en **Configuracion** (esquina superior derecha).
-   - Ajusta **URL base** (ej. `http://localhost:5001`) y **Endpoint**
+   - Ajusta **URL base** del gateway (ej. `http://localhost:8080/catalogo/api`) y **Endpoint**
      (ej. `/books`).
    - Da clic en **Guardar y cargar catalogo**. La nueva configuracion queda
      guardada en `localStorage` para la proxima vez que abras la app.
-   - **Restablecer valores por defecto** regresa a la URL original.
+   - **Restablecer valores por defecto** regresa a la URL del gateway definida en `main.js` / `EG4_GATEWAY_URL`.
 
 5. Navega el catalogo con **Anterior / Siguiente**; el tamano de pagina
    (6/12/24 libros) tambien se guarda en la configuracion.
