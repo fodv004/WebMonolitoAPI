@@ -11,7 +11,7 @@ import mx.eg4.desktop.http.ApiException;
 import mx.eg4.desktop.http.Json;
 import mx.eg4.desktop.model.Pago;
 
-/** pagos (5005): POST /pagos (con Idempotency-Key) y GET /pagos/pedido/&lt;id&gt;. */
+/** pagos (gateway /pagos): POST /pagos (con Idempotency-Key) y GET /pagos/pedido/&lt;id&gt;. */
 public final class PagosService {
 
     public static final String TARJETA = "TARJETA_SIMULADA";

@@ -6,7 +6,7 @@ import mx.eg4.desktop.http.ApiException;
 import mx.eg4.desktop.http.Json;
 import mx.eg4.desktop.model.Usuario;
 
-/** users (5002): GET /users/me. */
+/** users (gateway /users): GET /users/me. */
 public final class UsersService {
 
     private final ApiClient api;

@@ -21,7 +21,7 @@ import mx.eg4.desktop.model.Envio;
 import mx.eg4.desktop.util.Log;
 
 /**
- * WebSocket de tracking: ws://host:5900/ws?role=cliente&amp;codigo=&lt;codigo&gt;
+ * WebSocket de tracking: ws://IP_EXTERNA:8080/catalogo/api/ws?role=cliente&amp;codigo=&lt;codigo&gt;
  * con el header Authorization: Bearer &lt;token&gt; (java.net.http.WebSocket).
  *
  * Mensajes del servidor (apps/services/tracking/routes/ws.py):

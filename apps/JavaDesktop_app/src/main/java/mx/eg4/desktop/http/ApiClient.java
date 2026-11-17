@@ -191,12 +191,12 @@ public final class ApiClient {
         } catch (HttpTimeoutException e) {
             Log.http(method, url, 0, (System.nanoTime() - t0) / 1_000_000);
             throw new ApiException(s.key, 0, ApiException.RED,
-                    "El servicio " + s.key + " no respondio a tiempo (" + cfg.host() + ":" + cfg.port(s) + ").");
+                    "El servicio " + s.key + " no respondio a tiempo (gateway " + cfg.host() + ").");
         } catch (IOException e) {
             Log.http(method, url, 0, (System.nanoTime() - t0) / 1_000_000);
             throw new ApiException(s.key, 0, ApiException.RED,
-                    "No se pudo conectar con el servicio " + s.key + " (" + cfg.host() + ":" + cfg.port(s)
-                            + "). Revisa tu red o que el servicio este corriendo.");
+                    "No se pudo conectar con el servicio " + s.key + " (gateway " + cfg.host()
+                            + "). Revisa tu red o que el gateway y el servicio esten corriendo.");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ApiException(s.key, 0, ApiException.RED, "Peticion interrumpida.");
@@ -219,7 +219,7 @@ public final class ApiClient {
         }
     }
 
-    /** URL completa; login y books llevan ?format=json. */
+    /** URL completa: gateway + ruta del servicio (/login, /books, ...); login y books llevan ?format=json. */
     public String url(Service s, String path, boolean jsonFormat) {
         String url = cfg.baseUrl(s) + path;
         if (jsonFormat && (s == Service.LOGIN || s == Service.BOOKS)) {

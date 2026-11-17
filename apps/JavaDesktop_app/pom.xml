@@ -11,7 +11,8 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- JavaFX 27 esta compilado para Java 25 (class file 69): release >= 25 -->
+        <!-- JavaFX 27 esta compilado para Java 25 (class file 69): release >= 25.
+             No bajar a JavaFX 21: javafx.web 21 requiere jdk.jsobject, que el JDK 24+ ya no trae. -->
         <maven.compiler.release>25</maven.compiler.release>
         <javafx.version>27.0.1</javafx.version>
         <jackson.version>2.22.4</jackson.version>

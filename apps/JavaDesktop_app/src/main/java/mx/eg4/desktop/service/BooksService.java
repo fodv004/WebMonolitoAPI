@@ -11,7 +11,7 @@ import mx.eg4.desktop.http.ApiException;
 import mx.eg4.desktop.http.Json;
 import mx.eg4.desktop.model.Book;
 
-/** books (5001): GET /books y GET /books/&lt;isbn&gt; (ApiClient agrega ?format=json). */
+/** books (gateway /books): GET /books y GET /books/&lt;isbn&gt; (ApiClient agrega ?format=json). */
 public final class BooksService {
 
     private final ApiClient api;

@@ -12,7 +12,7 @@ import mx.eg4.desktop.http.ApiException;
 import mx.eg4.desktop.http.Json;
 import mx.eg4.desktop.model.Envio;
 
-/** tracking (5900): POST /envios, GET /envios (paginado) y GET /envios/&lt;codigo&gt;. */
+/** tracking (gateway /envios): POST /envios, GET /envios (paginado) y GET /envios/&lt;codigo&gt;. */
 public final class EnviosService {
 
     private static final int POR_PAGINA = 100;

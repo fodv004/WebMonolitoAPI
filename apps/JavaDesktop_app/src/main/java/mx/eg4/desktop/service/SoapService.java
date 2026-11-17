@@ -19,9 +19,9 @@ import mx.eg4.desktop.http.ApiException;
 import mx.eg4.desktop.model.ProgresoSoap;
 
 /**
- * SOAP 1.1 de books (POST http://host:5001/soap), operacion ObtenerProgresoUsuario.
+ * SOAP 1.1 de books (POST <gateway.url>/soap), operacion ObtenerProgresoUsuario.
  * Contrato: apps/services/library_soap_service/wsdl/library-classifier.wsdl.
- * (El soap:address del WSDL apunta a otra IP/puerto; se usa host:5001 del config.)
+ * (El soap:address del WSDL apunta a otra IP/puerto; se usa gateway.url del config.)
  */
 public final class SoapService {
 

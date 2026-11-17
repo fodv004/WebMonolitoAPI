@@ -6,7 +6,6 @@ import java.util.Locale;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import javafx.application.Platform;
-import javafx.concurrent.Worker;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -33,7 +32,7 @@ import mx.eg4.desktop.ws.TrackingSocket;
 
 /**
  * Rastreo: GET /envios/&lt;codigo&gt; para la informacion inicial y luego el WebSocket
- * ws://host:5900/ws?role=cliente&amp;codigo=... para el snapshot y los updates.
+ * ws://IP_EXTERNA:8080/catalogo/api/ws?role=cliente&amp;codigo=... para el snapshot y los updates.
  */
 public final class TrackingView implements View {
 
@@ -101,17 +100,14 @@ public final class TrackingView implements View {
         banner.setMaxWidth(Double.MAX_VALUE);
         setBanner(null, null);
 
-        // El WebView va en el centro de un BorderPane: crece con todo el espacio junto al panel lateral.
+        // El mapa (WebView, o el panel alternativo si el WebView no se pudo cargar en este equipo)
+        // va en el centro de un BorderPane: crece con todo el espacio junto al panel lateral.
         BorderPane mapBox = new BorderPane(map.node());
         mapBox.setMinSize(0, 0);
         mapBox.getStyleClass().add("map-box");
         map.node().widthProperty().addListener((o, a, b) -> map.refrescarTamano());
         map.node().heightProperty().addListener((o, a, b) -> map.refrescarTamano());
-        map.engine().getLoadWorker().stateProperty().addListener((o, a, st) -> {
-            if (st == Worker.State.SUCCEEDED) {
-                map.refrescarTamano();
-            }
-        });
+        map.onLoaded(map::refrescarTamano);
         SplitPane split = new SplitPane(mapBox, sidePanel());
         split.setDividerPositions(0.7);
         SplitPane.setResizableWithParent(split.getItems().get(1), false);
@@ -339,7 +335,7 @@ public final class TrackingView implements View {
         if (lat != null) {
             setPosition(lat, lon, speed, u.path("received_at").asText(null));
         }
-        map.update(lat, lon, prog, estado);
+        map.update(lat, lon, prog, estado, u.path("received_at").asText(null));
         checkDelivered(estado);
     }
 

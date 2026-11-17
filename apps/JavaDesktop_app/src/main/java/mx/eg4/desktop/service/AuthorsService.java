@@ -9,7 +9,7 @@ import mx.eg4.desktop.http.ApiException;
 import mx.eg4.desktop.http.Json;
 import mx.eg4.desktop.model.Author;
 
-/** authors (5003): GET /authors/by-book/&lt;isbn&gt;. */
+/** authors (gateway /authors): GET /authors/by-book/&lt;isbn&gt;. */
 public final class AuthorsService {
 
     private final ApiClient api;

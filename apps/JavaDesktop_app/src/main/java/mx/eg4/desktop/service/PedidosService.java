@@ -12,7 +12,7 @@ import mx.eg4.desktop.http.ApiException;
 import mx.eg4.desktop.http.Json;
 import mx.eg4.desktop.model.Pedido;
 
-/** pedidos (5004). GET /pedidos es paginado (maximo 100 por pagina): se recorren todas las paginas. */
+/** pedidos (gateway /pedidos). GET /pedidos es paginado (maximo 100 por pagina): se recorren todas las paginas. */
 public final class PedidosService {
 
     private static final int POR_PAGINA = 100;

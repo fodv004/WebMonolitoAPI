@@ -12,7 +12,7 @@ import mx.eg4.desktop.http.Json;
 import mx.eg4.desktop.model.LoginResult;
 import mx.eg4.desktop.util.Log;
 
-/** login (5000): POST /login y POST /logout. POST /refresh lo hace ApiClient. */
+/** login (gateway /login, /logout): POST /login y POST /logout. POST /refresh lo hace ApiClient. */
 public final class LoginService {
 
     private final ApiClient api;
